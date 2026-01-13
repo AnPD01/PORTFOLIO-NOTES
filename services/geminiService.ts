@@ -3,6 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AssetHolding, MarketType } from "../types";
 
 export const getPortfolioAdvice = async (holdings: AssetHolding[]) => {
+  // Use process.env.API_KEY directly for initialization as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const portfolioText = holdings.map(h => 
@@ -44,6 +45,7 @@ export interface BondInfoResult {
 
 export const lookupBondInfo = async (symbol: string): Promise<BondInfoResult | null> => {
   if (!symbol || symbol.length < 3) return null;
+  // Use process.env.API_KEY directly for initialization as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
@@ -82,6 +84,7 @@ export interface StockSearchResult {
 export const searchStocks = async (query: string): Promise<StockSearchResult[]> => {
   if (!query || query.length < 2) return [];
   
+  // Use process.env.API_KEY directly for initialization as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
