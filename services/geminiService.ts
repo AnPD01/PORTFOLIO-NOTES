@@ -29,7 +29,6 @@ export const getPortfolioAdvice = async (holdings: AssetHolding[]) => {
         systemInstruction: "당신은 주식 및 채권 자산 배분을 전문으로 하는 금융 전문가입니다. 사용자의 투자 현황을 분석하고 전략적인 조언을 제공합니다.",
       }
     });
-    // Access .text property directly (not a method)
     return response.text;
   } catch (error) {
     console.error("Gemini Error:", error);
@@ -46,7 +45,6 @@ export interface BondInfoResult {
 
 export const lookupBondInfo = async (symbol: string): Promise<BondInfoResult | null> => {
   if (!symbol || symbol.length < 3) return null;
-  // Always use process.env.API_KEY directly for initialization
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
@@ -68,7 +66,6 @@ export const lookupBondInfo = async (symbol: string): Promise<BondInfoResult | n
         }
       }
     });
-    // Access .text property directly (not a method)
     return JSON.parse(response.text || "null");
   } catch (error) {
     console.error("Bond Lookup Error:", error);
@@ -85,8 +82,6 @@ export interface StockSearchResult {
 
 export const searchStocks = async (query: string): Promise<StockSearchResult[]> => {
   if (!query || query.length < 2) return [];
-  
-  // Always use process.env.API_KEY directly for initialization
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
@@ -112,7 +107,6 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
       }
     });
 
-    // Access .text property directly (not a method)
     const results = JSON.parse(response.text || "[]");
     return results;
   } catch (error) {
