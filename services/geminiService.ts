@@ -1,17 +1,60 @@
-// ... 기존 import 문 ...
 
-// (Bond Lookup 함수 부분)
-export const lookupBondInfo = async (bondName: string) => {
-  // ... (앞부분 생략) ...
+import { GoogleGenAI, Type } from "@google/genai";
+import { AssetHolding, MarketType } from "../types";
+
+export const getPortfolioAdvice = async (holdings: AssetHolding[]) => {
+  // Always use process.env.API_KEY directly for initialization
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  const portfolioText = holdings.map(h => 
+    `${h.name}(${h.symbol}): ${h.quantity}주, 평단가 ${h.avgPurchasePrice}, 현재가 ${h.currentPrice}, 누적배당 ${h.dividendsReceived}`
+  ).join('\n');
+
+  const prompt = `
+    다음은 나의 주식 및 채권 포트폴리오 현황이야. 
+    이 포트폴리오를 분석해서 투자 조언을 해줘. 
+    특히 배당 수익과 채권 이자, 그리고 전체적인 자산 배분(국내/해외/계좌종류) 관점에서 분석해줘.
+    
+    포트폴리오:
+    ${portfolioText}
+
+    한국어로 답변해줘. 마크다운 형식을 사용해.
+  `;
+
   try {
-     // [수정됨] process.env -> import.meta.env.VITE_API_KEY 로 변경
-    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY }); 
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: prompt,
+      config: {
+        systemInstruction: "당신은 주식 및 채권 자산 배분을 전문으로 하는 금융 전문가입니다. 사용자의 투자 현황을 분석하고 전략적인 조언을 제공합니다.",
+      }
+    });
+    // Access .text property directly (not a method)
+    return response.text;
+  } catch (error) {
+    console.error("Gemini Error:", error);
+    return "AI 분석을 가져오는 중 오류가 발생했습니다.";
+  }
+};
 
+export interface BondInfoResult {
+  name: string;
+  couponRate: number;
+  maturityDate: string;
+  faceValue: number;
+}
+
+export const lookupBondInfo = async (symbol: string): Promise<BondInfoResult | null> => {
+  if (!symbol || symbol.length < 3) return null;
+  // Always use process.env.API_KEY directly for initialization
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Provide detailed information about the bond: "${bondName}". Include issuer, credit rating (Korean local rating if available), coupon rate, maturity date.`,
+      contents: `Search for the detailed specifications of the bond with code/ISIN: "${symbol}". You must find the 'Coupon Rate' (annual interest rate) accurately.`,
       config: {
-        systemInstruction: "You are a bond market expert. Return a JSON object with keys: 'name', 'couponRate' (number), 'maturityDate' (YYYY-MM-DD), 'faceValue' (number).",
+        systemInstruction: "You are a professional financial data extractor. Given a bond ISIN or code, return its EXACT details in JSON. 'name' is the full Korean name, 'couponRate' is the annual interest rate as a numeric percentage (e.g., 4.25), 'maturityDate' is YYYY-MM-DD, and 'faceValue' is the par value (default 10000).",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -21,10 +64,11 @@ export const lookupBondInfo = async (bondName: string) => {
             maturityDate: { type: Type.STRING },
             faceValue: { type: Type.NUMBER }
           },
-          required: ['name', 'couponRate', 'maturityDate', 'faceValue']
+          propertyOrdering: ['name', 'couponRate', 'maturityDate', 'faceValue']
         }
       }
     });
+    // Access .text property directly (not a method)
     return JSON.parse(response.text || "null");
   } catch (error) {
     console.error("Bond Lookup Error:", error);
@@ -42,9 +86,8 @@ export interface StockSearchResult {
 export const searchStocks = async (query: string): Promise<StockSearchResult[]> => {
   if (!query || query.length < 2) return [];
   
-  // [수정됨] process.env -> import.meta.env.VITE_API_KEY 로 변경
-  // 기존 주석("Use process.env...")은 무시하세요. Vite에서는 작동하지 않습니다.
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+  // Always use process.env.API_KEY directly for initialization
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     const response = await ai.models.generateContent({
@@ -60,15 +103,16 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
             properties: {
               symbol: { type: Type.STRING },
               name: { type: Type.STRING },
-              market: { type: Type.STRING, enum: ['KOREA', 'USA'] },
+              market: { type: Type.STRING },
               currentPriceEstimate: { type: Type.NUMBER }
             },
-            required: ['symbol', 'name', 'market', 'currentPriceEstimate']
+            propertyOrdering: ['symbol', 'name', 'market', 'currentPriceEstimate']
           }
         }
       }
     });
 
+    // Access .text property directly (not a method)
     const results = JSON.parse(response.text || "[]");
     return results;
   } catch (error) {
