@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { X, TrendingUp, ArrowUpRight, Percent, Wallet, Coins, Activity } from 'lucide-react';
+import { X, TrendingUp, Wallet, Coins, Activity, BarChart2, PieChart, ArrowUpRight, Percent, CircleDollarSign, History, Calendar, PlusCircle, MinusCircle, Sparkles, Timer, Plus, Minus } from 'lucide-react';
 import { 
   ComposedChart, 
   Line, 
@@ -12,7 +12,7 @@ import {
   Tooltip, 
   ResponsiveContainer
 } from 'recharts';
-import { StockHolding } from '../types';
+import { StockHolding, MarketType } from '../types';
 
 interface StockDetailModalProps {
   stock: StockHolding;
@@ -20,47 +20,78 @@ interface StockDetailModalProps {
 }
 
 const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) => {
-  const data = useMemo(() => {
-    const months = ['24.03', '24.04', '24.05', '24.06', '24.07', '24.08', '24.09', '24.10', '24.11', '24.12', '25.01', '25.02'];
-    let currentQty = Math.max(1, Math.round(stock.quantity * 0.6));
-    
-    return months.map((month, i) => {
-      if (i > 0 && Math.random() > 0.7) currentQty += Math.round(stock.quantity * 0.1);
-      if (i === months.length - 1) currentQty = stock.quantity;
-
-      const priceFactor = 0.8 + (i * 0.02) + (Math.random() * 0.15);
-      const simulatedPrice = Math.round(stock.currentPrice * priceFactor);
-      
-      return {
-        date: month,
-        evaluation: currentQty * simulatedPrice,
-        price: simulatedPrice,
-        quantity: currentQty
-      };
-    });
-  }, [stock]);
-
   const buyAmt = stock.quantity * stock.avgPurchasePrice;
   const evalAmt = stock.quantity * stock.currentPrice;
   const pl = evalAmt - buyAmt;
   const plRate = buyAmt > 0 ? (pl / buyAmt) * 100 : 0;
-  const divYield = buyAmt > 0 ? (stock.dividendsReceived / buyAmt) * 100 : 0;
-  
-  const totalReturnStock = pl + stock.dividendsReceived;
-  const totalReturnRateStock = buyAmt > 0 ? (totalReturnStock / buyAmt) * 100 : 0;
+  const dividends = stock.dividendsReceived;
+  const divYield = stock.dividendYield || 0;
 
-  const formatKRW = (num: number) => new Intl.NumberFormat('ko-KR').format(Math.round(num)) + '원';
-  const formatPct = (num: number) => num.toFixed(2) + '%';
+  // 12개월 평균값 (1개월 단위 표준 성과)
+  const avgMonthlyROI = plRate / 12;
+  const avgMonthlyDiv = dividends / 12;
+  const avgMonthlyYield = divYield / 12;
+
+  const totalReturn = pl + dividends;
+  const totalReturnRate = buyAmt > 0 ? (totalReturn / buyAmt) * 100 : 0;
+  const avgMonthlyTotalROI = totalReturnRate / 12;
+
+  // 메인 차트 데이터
+  const chartData = useMemo(() => {
+    const pDate = new Date(stock.purchaseDate).toISOString().split('T')[0].substring(2).replace(/-/g, '.');
+    const todayStr = new Date().toISOString().split('T')[0].substring(2).replace(/-/g, '.');
+
+    return [
+      {
+        date: pDate,
+        purchase: buyAmt,
+        evaluation: buyAmt,
+        profit: 0,
+        price: stock.avgPurchasePrice,
+        quantity: stock.quantity
+      },
+      {
+        date: todayStr,
+        purchase: buyAmt,
+        evaluation: evalAmt,
+        profit: pl,
+        price: stock.currentPrice,
+        quantity: stock.quantity
+      }
+    ];
+  }, [stock, buyAmt, evalAmt, pl]);
+
+  const tradeHistory = useMemo(() => {
+    return [
+      {
+        id: '1',
+        date: stock.purchaseDate,
+        type: '매수',
+        quantity: stock.quantity,
+        price: stock.avgPurchasePrice,
+        amount: stock.quantity * stock.avgPurchasePrice
+      }
+    ];
+  }, [stock]);
+
+  const formatCurrency = (num: number) => {
+    const symbol = stock.market === MarketType.USA ? '$' : '₩';
+    const formatted = new Intl.NumberFormat('ko-KR').format(Math.round(num));
+    return stock.market === MarketType.USA ? `${symbol}${formatted}` : `${formatted}원`;
+  };
+
+  const formatPercent = (num: number) => (num >= 0 ? '+' : '') + num.toFixed(2) + '%';
+  const getTrendValueColor = (val: number) => val >= 0 ? 'text-blue-600' : 'text-rose-600';
 
   const stats = [
-    { label: '평가금액', value: formatKRW(evalAmt), icon: <Wallet size={16}/>, color: 'text-slate-900' },
-    { label: '평가수익률', value: (pl >= 0 ? '+' : '') + formatPct(plRate), icon: <Activity size={16}/>, color: pl >= 0 ? 'text-rose-500' : 'text-blue-500' },
-    { label: '배당금', value: formatKRW(stock.dividendsReceived), icon: <Coins size={16}/>, color: 'text-emerald-600' },
-    { label: '배당수익률', value: formatPct(divYield), icon: <Percent size={16}/>, color: 'text-emerald-500' },
-    { label: '매도수익', value: '0원', icon: <ArrowUpRight size={16}/>, color: 'text-slate-400' },
-    { label: '매도수익률', value: '0.00%', icon: <Percent size={16}/>, color: 'text-slate-400' },
-    { label: '총 수익', value: formatKRW(totalReturnStock), icon: <TrendingUp size={16}/>, color: totalReturnStock >= 0 ? 'text-rose-500' : 'text-blue-500' },
-    { label: '총 수익률', value: (totalReturnStock >= 0 ? '+' : '') + formatPct(totalReturnRateStock), icon: <Percent size={16}/>, color: totalReturnStock >= 0 ? 'text-rose-500' : 'text-blue-500' },
+    { label: '평가금액', value: formatCurrency(evalAmt), icon: <Wallet size={12}/>, color: 'text-slate-900' },
+    { label: '평가수익률', value: formatPercent(plRate), icon: <Activity size={12}/>, color: getTrendValueColor(plRate), monthlyAvg: formatPercent(avgMonthlyROI) },
+    { label: '배당금', value: formatCurrency(dividends), icon: <Coins size={12}/>, color: 'text-emerald-600', monthlyAvg: formatCurrency(avgMonthlyDiv) },
+    { label: '배당수익률', value: formatPercent(divYield), icon: <Percent size={12}/>, color: 'text-emerald-500', monthlyAvg: formatPercent(avgMonthlyYield) },
+    { label: '매도수익', value: formatCurrency(0), icon: <ArrowUpRight size={12}/>, color: 'text-slate-400' },
+    { label: '매도수익률', value: formatPercent(0), icon: <BarChart2 size={12}/>, color: 'text-slate-400' },
+    { label: '총 수익', value: formatCurrency(totalReturn), icon: <TrendingUp size={12}/>, color: getTrendValueColor(totalReturn) },
+    { label: '총 수익률', value: formatPercent(totalReturnRate), icon: <PieChart size={12}/>, color: getTrendValueColor(totalReturnRate), monthlyAvg: formatPercent(avgMonthlyTotalROI) },
   ];
 
   return (
@@ -69,80 +100,196 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
       onClick={onClose}
     >
       <div 
-        className="bg-white/70 rounded-[4rem] shadow-[0_50px_100px_rgba(0,0,0,0.1)] w-full max-w-7xl overflow-hidden flex flex-col max-h-[92vh] border border-white/60 animate-in zoom-in-95 duration-500"
+        className="bg-white/95 rounded-[3rem] shadow-[0_50px_100px_rgba(0,0,0,0.15)] w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] border border-white/60 animate-in zoom-in-95 duration-500"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-14 py-10 border-b border-white/40 flex items-center justify-between bg-white/20">
-          <div className="flex items-center gap-6">
-            <div className="bg-indigo-600 text-white p-5 rounded-[1.8rem] shadow-2xl shadow-indigo-200">
-              <TrendingUp size={32} />
+        {/* Header Section */}
+        <div className="px-10 py-6 border-b border-white/40 flex items-center justify-between bg-white/40">
+          <div className="flex items-center gap-4">
+            <div className="bg-indigo-600 text-white p-3.5 rounded-2xl shadow-xl shadow-indigo-100">
+              <TrendingUp size={22} />
             </div>
             <div>
-              <div className="flex items-center gap-4">
-                <h2 className="text-4xl font-black text-slate-900 tracking-tighter">{stock.name}</h2>
-                <span className="bg-white/80 border border-white text-indigo-600 text-xs font-black px-4 py-1.5 rounded-full uppercase tracking-[0.2em] shadow-sm">{stock.symbol}</span>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-2xl font-black text-slate-900 tracking-tighter">{stock.name}</h2>
+                <span className="bg-white border border-slate-100 text-indigo-600 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest shadow-sm">{stock.symbol}</span>
               </div>
-              <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.3em] mt-2 opacity-70">{stock.market} MARKET • {stock.account}</p>
+              <p className="text-slate-400 font-bold text-[9px] uppercase tracking-[0.3em] mt-1 flex items-center gap-2">
+                <span>{stock.market} MARKET</span>
+                <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                <div className="flex gap-1">
+                  {[1, 2, 3].map(i => <div key={i} className="w-1 h-1 rounded-full bg-slate-200"></div>)}
+                </div>
+              </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-4 bg-white/50 hover:bg-white rounded-[1.5rem] transition-all duration-300 shadow-sm"><X size={24}/></button>
+          <button onClick={onClose} className="p-3 bg-white/70 hover:bg-white rounded-xl transition-all shadow-sm border border-slate-100"><X size={20} className="text-slate-400"/></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-14 scrollbar-hide">
-          {/* 그리드 구조를 8열에서 4열로 변경하여 공간 확보 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-14">
+        <div className="flex-1 overflow-y-auto p-8 scrollbar-hide space-y-8">
+          {/* Metrics Grid */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {stats.map((stat, idx) => (
-              <div key={idx} className="bg-white/50 p-6 rounded-[2.5rem] border border-white shadow-sm flex flex-col justify-center transition-all hover:bg-white hover:shadow-xl min-h-[120px]">
-                <div className="flex items-center gap-2 text-slate-400 mb-3">
-                  <span className="opacity-80">{stat.icon}</span>
-                  <span className="text-[10px] font-black uppercase tracking-widest">{stat.label}</span>
+              <div key={idx} className="bg-white/60 p-4 rounded-2xl border border-white shadow-sm transition-all hover:bg-white hover:shadow-md group flex flex-col justify-between min-h-[100px]">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 text-slate-400 group-hover:text-indigo-500 transition-colors">
+                    <span className="p-1.5 bg-slate-50 rounded-lg">{stat.icon}</span>
+                    <span className="text-[9px] font-black uppercase tracking-widest">{stat.label}</span>
+                  </div>
                 </div>
-                <div className={`text-xl font-black tabular-nums tracking-tight ${stat.color}`}>{stat.value}</div>
+                
+                <div className="text-right">
+                  <div className={`text-lg font-black tabular-nums tracking-tighter ${stat.color}`}>{stat.value}</div>
+                  
+                  {stat.monthlyAvg !== undefined ? (
+                    <div className="mt-1 flex items-center justify-end gap-1 opacity-70">
+                      <Timer size={8} className="text-slate-400" />
+                      <span className={`text-[10px] font-bold tabular-nums ${stat.color}`}>{stat.monthlyAvg}</span>
+                    </div>
+                  ) : (
+                    <div className="h-4" />
+                  )}
+                </div>
               </div>
             ))}
           </div>
 
-          <div className="bg-white/40 border border-white rounded-[3.5rem] p-12 shadow-sm backdrop-blur-md">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-12 gap-6">
-              <div>
-                <h3 className="text-lg font-black text-slate-900 tracking-tight">Performance History (12M)</h3>
-                <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">Simulated Dynamic Evaluation</p>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Chart Section */}
+            <div className="lg:col-span-2 bg-white/50 border border-white rounded-[2.5rem] p-8 shadow-sm backdrop-blur-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
+                <div>
+                  <h3 className="text-base font-black text-slate-900 tracking-tight">Portfolio Performance</h3>
+                  <p className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-[0.2em]">RECORDED ASSET EVALUATION</p>
+                </div>
+                <div className="flex gap-4">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full border border-indigo-600 bg-white"/>
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">EVAL</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-amber-400"/>
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">PRICE</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-6">
-                <div className="flex items-center gap-2.5"><div className="w-3 h-3 rounded-full bg-indigo-500/30 border-2 border-indigo-500"/><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Eval</span></div>
-                <div className="flex items-center gap-2.5"><div className="w-3 h-3 rounded-full bg-amber-500 shadow-md shadow-amber-200"/><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Price</span></div>
-                <div className="flex items-center gap-2.5"><div className="w-3 h-3 rounded-full bg-emerald-400 shadow-md shadow-emerald-200"/><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Quantity</span></div>
+              
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={chartData} margin={{ top: 10, right: 30, bottom: 0, left: 10 }}>
+                    <defs>
+                      <linearGradient id="colorEval" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.02)" />
+                    <XAxis 
+                      dataKey="date" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} 
+                      dy={10}
+                    />
+                    <YAxis 
+                      yAxisId="left" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} 
+                      tickFormatter={(val) => new Intl.NumberFormat('ko-KR', { notation: 'compact' }).format(val)}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        borderRadius: '20px', 
+                        border: 'none', 
+                        background: 'rgba(255,255,255,0.98)', 
+                        backdropFilter: 'blur(10px)', 
+                        boxShadow: '0 20px 40px rgba(0,0,0,0.08)', 
+                        padding: '16px' 
+                      }}
+                      labelStyle={{ fontWeight: 900, marginBottom: '6px', color: '#1e293b', fontSize: '12px' }}
+                      itemStyle={{ fontSize: '11px', fontWeight: 700, padding: '1px 0' }}
+                    />
+                    <Area 
+                      yAxisId="left" 
+                      type="monotone" 
+                      dataKey="evaluation" 
+                      fill="url(#colorEval)" 
+                      stroke="#6366f1" 
+                      strokeWidth={3} 
+                      dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
+                      activeDot={{ r: 6, strokeWidth: 0 }}
+                    />
+                    <Line 
+                      yAxisId="left" 
+                      type="monotone" 
+                      dataKey="price" 
+                      stroke="#f59e0b" 
+                      strokeWidth={2} 
+                      dot={false}
+                      strokeDasharray="4 4"
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
               </div>
             </div>
-            
-            <div className="h-[400px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={data} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
-                  <defs>
-                    <linearGradient id="colorEval" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.4)" />
-                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fontWeight: 800, fill: '#94a3b8' }} dy={15}/>
-                  <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 11, fontWeight: 800, fill: '#94a3b8' }} tickFormatter={(val) => new Intl.NumberFormat('ko-KR', { notation: 'compact' }).format(val)}/>
-                  <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 11, fontWeight: 800, fill: '#94a3b8' }} tickFormatter={(val) => `${val}주`}/>
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '24px', border: 'none', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(20px)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.1)', padding: '20px' }}
-                    labelStyle={{ fontWeight: 900, marginBottom: '8px', color: '#1e293b' }}
-                  />
-                  <Area yAxisId="left" type="monotone" dataKey="evaluation" fill="url(#colorEval)" stroke="#6366f1" strokeWidth={0} />
-                  <Bar yAxisId="right" dataKey="quantity" fill="#10b981" radius={[6, 6, 0, 0]} barSize={24} opacity={0.5} />
-                  <Line yAxisId="left" type="monotone" dataKey="price" stroke="#f59e0b" strokeWidth={4} dot={{ r: 6, fill: '#f59e0b', strokeWidth: 3, stroke: '#fff' }} activeDot={{ r: 8, strokeWidth: 4 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
+
+            {/* Trading History Section - Compact Timeline */}
+            <div className="bg-white/40 border border-white rounded-[2.5rem] p-6 shadow-sm backdrop-blur-md overflow-hidden relative">
+              <div className="flex items-center gap-3 mb-8 relative z-10">
+                <div className="p-2 bg-slate-900 text-white rounded-xl shadow-lg">
+                  <History size={16} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 tracking-tight">거래 내역</h3>
+                  <p className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-[0.2em]">Transaction Timeline</p>
+                </div>
+              </div>
+
+              {/* Timeline Line adjusted to left */}
+              <div className="space-y-5 relative before:absolute before:inset-0 before:left-[10px] before:w-px before:bg-slate-100/80 before:z-0 ml-1">
+                {tradeHistory.map((trade) => (
+                  <div key={trade.id} className="relative z-10 flex items-center gap-3 group">
+                    {/* Compact Circle Indicator - Reduced size by half */}
+                    <div className={`w-5 h-5 rounded-full flex items-center justify-center border-2 border-white shadow-sm flex-shrink-0 transition-transform group-hover:scale-125 z-10 ${trade.type === '매수' ? 'bg-rose-500 text-white' : 'bg-blue-500 text-white'}`}>
+                      {trade.type === '매수' ? <Plus size={8} strokeWidth={5} /> : <Minus size={8} strokeWidth={5} />}
+                    </div>
+                    
+                    {/* Compact Transaction Card */}
+                    <div className="flex-1 bg-white/60 p-3.5 rounded-2xl border border-white/60 flex items-center justify-between group-hover:bg-white group-hover:shadow-md group-hover:border-indigo-100 transition-all min-w-0">
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[11px] font-black text-slate-800 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis block">
+                          {trade.date}
+                        </span>
+                        <div className="flex items-center gap-1.5 mt-0.5 whitespace-nowrap">
+                          <span className={`text-[9px] font-black uppercase tracking-widest flex-shrink-0 ${trade.type === '매수' ? 'text-rose-500' : 'text-blue-500'}`}>{trade.type}</span>
+                          <span className="w-0.5 h-0.5 rounded-full bg-slate-200"></span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight flex-shrink-0">{trade.quantity}주</span>
+                        </div>
+                      </div>
+                      <div className="text-right pl-3 flex-shrink-0">
+                        <div className="text-[12px] font-black text-slate-900 tabular-nums tracking-tighter">
+                          {formatCurrency(trade.amount)}
+                        </div>
+                        <div className="text-[9px] font-bold text-slate-400 mt-0.5 tabular-nums">
+                          @ {formatCurrency(trade.price)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {tradeHistory.length === 0 && (
+                <div className="py-20 flex flex-col items-center justify-center text-center">
+                  <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-200 mb-4 border border-slate-100 border-dashed">
+                     <History size={20} />
+                  </div>
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No transactions yet</p>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-
-        <div className="px-14 py-10 border-t border-white/40 flex justify-end bg-white/20">
-          <button onClick={onClose} className="px-14 py-4 bg-slate-900 text-white rounded-[2rem] font-black text-sm hover:bg-slate-800 active:scale-95 transition-all shadow-[0_20px_40px_rgba(0,0,0,0.15)]">Close Analytics</button>
         </div>
       </div>
     </div>

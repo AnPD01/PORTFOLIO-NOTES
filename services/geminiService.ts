@@ -3,7 +3,6 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AssetHolding, MarketType } from "../types";
 
 export const getPortfolioAdvice = async (holdings: AssetHolding[]) => {
-  // Always use process.env.API_KEY directly for initialization
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const portfolioText = holdings.map(h => 
@@ -78,6 +77,7 @@ export interface StockSearchResult {
   name: string;
   market: MarketType;
   currentPriceEstimate: number;
+  dividendYield: number; // 전년도 배당수익률 추가
 }
 
 export const searchStocks = async (query: string): Promise<StockSearchResult[]> => {
@@ -87,9 +87,9 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Search for stocks or ETFs matching the query: "${query}". Return at most 5 best matches. Include Korean stocks and US stocks.`,
+      contents: `Search for stocks or ETFs matching the query: "${query}". Return at most 5 best matches. For each stock, you MUST find the actual official dividend yield of the previous year.`,
       config: {
-        systemInstruction: "You are a stock search assistant. Return a JSON array of objects. Each object has: 'symbol', 'name', 'market' (must be 'KOREA' or 'USA'), 'currentPriceEstimate' (number, in local currency). If it's a Korean stock, provide the 6-digit code as symbol. If US, provide the ticker.",
+        systemInstruction: "You are a stock search assistant. Return a JSON array of objects. Each object has: 'symbol', 'name', 'market' (must be 'KOREA' or 'USA'), 'currentPriceEstimate' (number, in local currency), and 'dividendYield' (number, the annual dividend yield of the previous year in percentage, e.g., 2.5). If it's a Korean stock, provide the 6-digit code as symbol. If US, provide the ticker.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -99,9 +99,10 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
               symbol: { type: Type.STRING },
               name: { type: Type.STRING },
               market: { type: Type.STRING },
-              currentPriceEstimate: { type: Type.NUMBER }
+              currentPriceEstimate: { type: Type.NUMBER },
+              dividendYield: { type: Type.NUMBER }
             },
-            propertyOrdering: ['symbol', 'name', 'market', 'currentPriceEstimate']
+            propertyOrdering: ['symbol', 'name', 'market', 'currentPriceEstimate', 'dividendYield']
           }
         }
       }

@@ -9,17 +9,18 @@ import {
   Coins,
   ArrowUpRight,
   Banknote,
-  Info,
-  ScrollText,
   RotateCcw,
   Download,
   Upload,
   Cloud,
   CloudOff,
   CloudSync,
-  LogOut,
   Settings,
-  X
+  X,
+  Loader2,
+  Inbox,
+  ScrollText,
+  DollarSign
 } from 'lucide-react';
 import { INITIAL_HOLDINGS } from './constants';
 import { AssetHolding, MarketType, AssetType, CashBalance } from './types';
@@ -30,7 +31,7 @@ import AddStockModal from './components/AddStockModal';
 import AddBondModal from './components/AddBondModal';
 import AIInsightSection from './components/AIInsightSection';
 import { getPortfolioAdvice } from './services/geminiService';
-import { GoogleDriveService, CloudData } from './services/googleDriveService';
+import { GoogleDriveService } from './services/googleDriveService';
 
 const EXCHANGE_RATE = 1350;
 const STORAGE_KEYS = {
@@ -40,22 +41,19 @@ const STORAGE_KEYS = {
   GOOGLE_CLIENT_ID: 'portfolio_google_client_id'
 };
 
-// Vite 환경 변수에서 구글 클라이언트 ID 로드
-// FIX: Typecast import.meta to any to resolve TS error where 'env' property is not recognized
 const VITE_GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
 
 const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // 구글 드라이브 관련 상태
-  // 환경 변수값이 있으면 이를 기본값으로 사용하고, 없으면 localStorage에서 로드함
+  const [isAppLoading, setIsAppLoading] = useState(true);
+
   const [googleClientId, setGoogleClientId] = useState(() => VITE_GOOGLE_CLIENT_ID || localStorage.getItem(STORAGE_KEYS.GOOGLE_CLIENT_ID) || '');
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [showCloudSettings, setShowCloudSettings] = useState(false);
   const [driveService, setDriveService] = useState<GoogleDriveService | null>(null);
 
-  // 1. 데이터 상태
   const [holdings, setHoldings] = useState<AssetHolding[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.HOLDINGS);
     return saved ? JSON.parse(saved) : INITIAL_HOLDINGS;
@@ -68,22 +66,20 @@ const App: React.FC = () => {
 
   const [cashBalances, setCashBalances] = useState<Record<string, CashBalance>>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.CASH);
-    if (saved) return JSON.parse(saved);
-    return {
-      '삼성증권 ISA': { krw: 5420000, usd: 0 },
-      '키움 해외주식': { krw: 1250, usd: 120 },
-      '미래에셋 연금': { krw: 3200000, usd: 0 }
-    };
+    return saved ? JSON.parse(saved) : {};
   });
 
-  // 로컬 스토리지 자동 저장
+  useEffect(() => {
+    const timer = setTimeout(() => setIsAppLoading(false), 800);
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.HOLDINGS, JSON.stringify(holdings));
     localStorage.setItem(STORAGE_KEYS.PROFITS, JSON.stringify(realizedProfits));
     localStorage.setItem(STORAGE_KEYS.CASH, JSON.stringify(cashBalances));
   }, [holdings, realizedProfits, cashBalances]);
 
-  // 구글 클라이언트 ID 변경 시 서비스 초기화 (import.meta.env 우선 적용)
   useEffect(() => {
     const finalClientId = VITE_GOOGLE_CLIENT_ID || googleClientId;
     if (finalClientId) {
@@ -98,7 +94,7 @@ const App: React.FC = () => {
 
   const handleCloudConnect = () => {
     if (!driveService) {
-      alert("구글 클라이언트 ID가 설정되지 않았습니다. 환경 변수(VITE_GOOGLE_CLIENT_ID) 또는 설정 메뉴를 확인해주세요.");
+      alert("구글 클라이언트 ID가 설정되지 않았습니다.");
       setShowCloudSettings(true);
       return;
     }
@@ -109,8 +105,7 @@ const App: React.FC = () => {
       });
       driveService.requestToken();
     } catch (error) {
-      console.error("클라우드 연결 오류:", error);
-      alert("구글 로그인 초기화 중 오류가 발생했습니다. 클라이언트 ID가 올바른지 확인해주세요.");
+      alert("구글 로그인 초기화 중 오류가 발생했습니다.");
     }
   };
 
@@ -138,7 +133,7 @@ const App: React.FC = () => {
     try {
       const fileId = await driveService.findDataFile();
       if (fileId) {
-        if (window.confirm("클라우드에 저장된 데이터가 있습니다. 불러오시겠습니까? (현재 로컬 데이터가 덮어씌워집니다)")) {
+        if (window.confirm("클라우드에 저장된 데이터가 있습니다. 불러오시겠습니까?")) {
           const data = await driveService.downloadData(fileId);
           if (data) {
             setHoldings(data.holdings);
@@ -149,7 +144,6 @@ const App: React.FC = () => {
         }
       }
     } catch (e) {
-      console.error(e);
       alert("클라우드 데이터를 확인하는 중 오류가 발생했습니다.");
     } finally {
       setIsCloudSyncing(false);
@@ -162,7 +156,7 @@ const App: React.FC = () => {
   const [isBondModalOpen, setIsBondModalOpen] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState<'totalAsset' | 'unrealizedProfit' | 'tradingProfit' | 'dividendIncome' | 'totalReturn' | 'totalCash'>('totalAsset');
   const [timeScale, setTimeScale] = useState<'monthly' | 'yearly'>('monthly');
-  const [openAccount, setOpenAccount] = useState<string | null>(holdings[0]?.account || null);
+  const [openAccount, setOpenAccount] = useState<string | null>(null);
 
   const handleExportData = () => {
     const data = { holdings, realizedProfits, cashBalances, version: '1.0', exportedAt: new Date().toISOString() };
@@ -187,8 +181,6 @@ const App: React.FC = () => {
           setRealizedProfits(data.realizedProfits || {});
           setCashBalances(data.cashBalances);
           alert("데이터가 성공적으로 복구되었습니다.");
-        } else {
-          alert("올바른 백업 파일 형식이 아닙니다.");
         }
       } catch (err) {
         alert("파일을 읽는 중 오류가 발생했습니다.");
@@ -290,15 +282,11 @@ const App: React.FC = () => {
   };
 
   const handleResetData = () => {
-    if (window.confirm("모든 데이터를 초기화하시겠습니까? (백업하지 않은 데이터는 삭제됩니다)")) {
+    if (window.confirm("모든 데이터를 초기화하시겠습니까?")) {
       localStorage.clear();
       window.location.reload();
     }
   };
-
-  useEffect(() => {
-    if (holdings.length > 0 && !advice) handleAnalyzePortfolio();
-  }, []);
 
   const formatKRW = (num: number) => new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW' }).format(num);
 
@@ -313,7 +301,7 @@ const App: React.FC = () => {
   }, [holdings, cashBalances]);
 
   const trendData = useMemo(() => {
-    const baseValue = {
+    const currentValue = {
       totalAsset: summary.totalEvaluationAmount,
       unrealizedProfit: summary.totalUnrealizedProfit,
       tradingProfit: summary.totalRealizedProfit,
@@ -321,9 +309,27 @@ const App: React.FC = () => {
       totalReturn: summary.totalReturnAmount,
       totalCash: summary.totalCash
     }[selectedMetric];
-    const months = ['24.03', '24.04', '24.05', '24.06', '24.07', '24.08', '24.09', '24.10', '24.11', '24.12', '25.01', '25.02'];
-    return months.map((date, i) => ({ date, value: Math.round(baseValue * (0.8 + i * 0.02 + Math.random() * 0.1)) }));
+    
+    const todayStr = new Date().toISOString().split('T')[0].substring(2).replace(/-/g, '.');
+    return [{ date: todayStr, value: Math.round(currentValue) }];
   }, [summary, selectedMetric]);
+
+  if (isAppLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
+        <div className="bg-indigo-600 p-5 rounded-[2rem] text-white shadow-2xl animate-bounce mb-8">
+          <BarChart3 size={48} />
+        </div>
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex items-center gap-3">
+            <Loader2 className="animate-spin text-indigo-600" size={24} />
+            <span className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">PORTFOLIO NOTES</span>
+          </div>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">포트폴리오를 구성하는 중입니다...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen pb-24 font-sans tracking-tight">
@@ -338,45 +344,36 @@ const App: React.FC = () => {
               <p className="text-[10px] font-black text-slate-400 mt-2 uppercase tracking-[0.4em]">Asset Management</p>
             </div>
           </div>
+          
           <div className="flex items-center gap-3">
-            <div className="flex bg-slate-100 p-1.5 rounded-[1.4rem] mr-2">
-              <button 
-                onClick={handleCloudConnect}
-                className={`p-3 transition-all rounded-xl hover:bg-white hover:shadow-sm ${isCloudConnected ? 'text-indigo-600' : 'text-slate-400'}`}
-                title="클라우드 동기화"
-              >
+            <div className="hidden sm:flex bg-slate-100 p-1.5 rounded-[1.4rem] mr-2">
+              <button onClick={handleCloudConnect} className={`p-3 transition-all rounded-xl hover:bg-white hover:shadow-sm ${isCloudConnected ? 'text-indigo-600' : 'text-slate-400'}`}>
                 {isCloudSyncing ? <CloudSync size={18} className="animate-spin" /> : isCloudConnected ? <Cloud size={18} /> : <CloudOff size={18} />}
               </button>
-              <button 
-                onClick={handleExportData}
-                className="p-3 text-slate-400 hover:text-indigo-600 transition-all rounded-xl hover:bg-white hover:shadow-sm"
-                title="데이터 백업 (JSON)"
-              >
-                <Download size={18} />
-              </button>
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="p-3 text-slate-400 hover:text-emerald-600 transition-all rounded-xl hover:bg-white hover:shadow-sm"
-                title="데이터 복구 (JSON)"
-              >
+              <button onClick={handleExportData} className="p-3 text-slate-400 hover:text-indigo-600 transition-all rounded-xl hover:bg-white hover:shadow-sm" title="백업"><Download size={18} /></button>
+              <button onClick={() => fileInputRef.current?.click()} className="p-3 text-slate-400 hover:text-emerald-600 transition-all rounded-xl hover:bg-white hover:shadow-sm" title="복구">
                 <Upload size={18} />
                 <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImportData} />
               </button>
+              <button onClick={() => setShowCloudSettings(true)} className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-white hover:shadow-sm"><Settings size={18} /></button>
+            </div>
+
+            <div className="flex items-center gap-2">
               <button 
-                onClick={() => setShowCloudSettings(true)}
-                className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-white hover:shadow-sm"
-                title="설정"
+                onClick={() => setIsStockModalOpen(true)}
+                className="flex items-center gap-2 px-6 py-3.5 bg-indigo-50 text-indigo-600 rounded-[1.2rem] hover:bg-indigo-100 transition-all font-black text-[11px] uppercase tracking-wider border border-indigo-100 active:scale-95"
               >
-                <Settings size={18} />
+                <TrendingUp size={16} />
+                <span>주식 추가</span>
+              </button>
+              <button 
+                onClick={() => setIsBondModalOpen(true)}
+                className="flex items-center gap-2 px-6 py-3.5 bg-violet-50 text-violet-600 rounded-[1.2rem] hover:bg-violet-100 transition-all font-black text-[11px] uppercase tracking-wider border border-violet-100 active:scale-95"
+              >
+                <ScrollText size={16} />
+                <span>채권 추가</span>
               </button>
             </div>
-            <button 
-              onClick={() => setIsStockModalOpen(true)}
-              className="flex items-center gap-2.5 px-8 py-4 bg-indigo-600 text-white rounded-[1.4rem] hover:bg-indigo-700 transition-all font-black text-xs shadow-2xl shadow-indigo-100 border-b-4 border-indigo-800"
-            >
-              <Plus size={18} />
-              <span>자산 추가</span>
-            </button>
           </div>
         </div>
       </header>
@@ -384,67 +381,111 @@ const App: React.FC = () => {
       <main className="max-w-7xl mx-auto px-6 sm:px-10 py-10">
         <div className="flex justify-end mb-6 gap-3">
           {isCloudConnected && (
-            <button 
-              onClick={handlePushToCloud}
-              className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-100 text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
-            >
-              <CloudSync size={14} /> 클라우드에 현재 상태 백업
+            <button onClick={handlePushToCloud} className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-100 text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all">
+              <CloudSync size={14} /> CLOUD BACKUP
             </button>
           )}
+
+          <div className="flex items-center gap-3 px-5 py-3 bg-white border border-slate-100 rounded-2xl shadow-sm">
+            <DollarSign size={14} className="text-amber-500" />
+            <span className="text-[10px] font-black text-slate-700 tracking-widest tabular-nums uppercase">
+              {EXCHANGE_RATE.toLocaleString()} KRW/USD
+            </span>
+          </div>
+
           <div className="flex items-center gap-3 px-5 py-3 bg-white border border-slate-100 rounded-2xl shadow-sm">
             <div className={`w-2 h-2 rounded-full animate-pulse ${isCloudConnected ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest tabular-nums">
-              {isCloudConnected ? '클라우드 연동 중' : '로컬 전용 모드'}
+              {isCloudConnected ? 'CLOUD SYNC ACTIVE' : 'LOCAL STORAGE'}
             </span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-12">
-          <DashboardCard title="자산 총액" value={formatKRW(summary.totalEvaluationAmount)} icon={<Wallet size={20} />} isActive={selectedMetric === 'totalAsset'} onClick={() => setSelectedMetric('totalAsset')} />
-          <DashboardCard title="전체 예수금" value={formatKRW(summary.totalCash)} icon={<Banknote size={20} />} isActive={selectedMetric === 'totalCash'} onClick={() => setSelectedMetric('totalCash')} />
+          <DashboardCard title="자산 총액" value={formatKRW(summary.totalEvaluationAmount)} icon={<Wallet size={20} />} isActive={selectedMetric === 'totalAsset'} onClick={() => setSelectedMetric('totalAsset')} trend="neutral" />
+          <DashboardCard title="전체 예수금" value={formatKRW(summary.totalCash)} icon={<Banknote size={20} />} isActive={selectedMetric === 'totalCash'} onClick={() => setSelectedMetric('totalCash')} trend="neutral" />
           <DashboardCard title="미실현 손익" value={formatKRW(summary.totalUnrealizedProfit)} trend={summary.totalUnrealizedProfit >= 0 ? 'up' : 'down'} icon={<TrendingUp size={20} />} isActive={selectedMetric === 'unrealizedProfit'} onClick={() => setSelectedMetric('unrealizedProfit')} />
           <DashboardCard title="매매 수익" value={formatKRW(summary.totalRealizedProfit)} trend={summary.totalRealizedProfit >= 0 ? 'up' : 'down'} icon={<ArrowUpRight size={20} />} isActive={selectedMetric === 'tradingProfit'} onClick={() => setSelectedMetric('tradingProfit')} />
-          <DashboardCard title="배당/이자" value={formatKRW(summary.totalDividends)} icon={<Coins size={20} />} isActive={selectedMetric === 'dividendIncome'} onClick={() => setSelectedMetric('dividendIncome')} />
+          <DashboardCard title="배당/이자" value={formatKRW(summary.totalDividends)} icon={<Coins size={20} />} isActive={selectedMetric === 'dividendIncome'} onClick={() => setSelectedMetric('dividendIncome')} trend="neutral" />
           <DashboardCard title="종합 수익률" value={summary.totalReturnRate.toFixed(2) + '%'} trend={summary.totalReturnAmount >= 0 ? 'up' : 'down'} icon={<Target size={20} />} isActive={selectedMetric === 'totalReturn'} onClick={() => setSelectedMetric('totalReturn')} />
         </div>
 
-        <div className="glass-panel p-12 rounded-[3.5rem] mb-12 overflow-hidden relative border border-white/60 shadow-2xl">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-8 mb-10 relative z-10">
-            <div>
-              <h3 className="text-2xl font-black text-slate-800 tracking-tighter">자산 추이 분석</h3>
-              <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.3em] mt-2">Historical Growth Pattern</p>
+        {holdings.length > 0 ? (
+          <>
+            <div className="glass-panel p-10 rounded-[3rem] mb-12 overflow-hidden relative border border-white/60 shadow-2xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-8 mb-10 relative z-10">
+                <div>
+                  <h3 className="text-xl font-black text-slate-800 tracking-tighter">자산 추이 분석</h3>
+                  <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.3em] mt-1">Real-time Asset Tracking</p>
+                </div>
+                <div className="flex bg-slate-100/60 p-1.5 rounded-2xl backdrop-blur-sm border border-slate-200/50 shadow-inner">
+                  <button 
+                    onClick={() => setTimeScale('monthly')} 
+                    className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${timeScale === 'monthly' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    12개월
+                  </button>
+                  <button 
+                    onClick={() => setTimeScale('yearly')} 
+                    className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${timeScale === 'yearly' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    년간
+                  </button>
+                </div>
+              </div>
+              <TrendChart data={trendData} title={selectedMetric} subtitle="(실시간)" />
             </div>
-            <div className="flex bg-slate-100/60 p-1.5 rounded-2xl backdrop-blur-sm border border-slate-200/50 shadow-inner">
-              <button onClick={() => setTimeScale('monthly')} className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all ${timeScale === 'monthly' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>12개월</button>
-              <button onClick={() => setTimeScale('yearly')} className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all ${timeScale === 'yearly' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>전체</button>
+
+            <AIInsightSection advice={advice} isAnalyzing={isAnalyzing} onAnalyze={handleAnalyzePortfolio} />
+
+            <div className="space-y-4">
+              {Object.entries(groupedHoldings).map(([account, assets]) => (
+                <StockTable 
+                  key={account} 
+                  title={account} 
+                  holdings={assets} 
+                  isOpen={openAccount === account}
+                  onToggle={() => setOpenAccount(openAccount === account ? null : account)}
+                  onDelete={(id) => setHoldings(prev => prev.filter(h => h.id !== id))}
+                  cashBalance={cashBalances[account] || { krw: 0, usd: 0 }}
+                  onUpdateCash={(amount, currency) => handleUpdateCash(account, amount, currency)}
+                  onAdjustHolding={handleAdjustHolding}
+                  realizedProfit={realizedProfits[account]}
+                  portfolioTotalEval={summary.totalEvaluationAmount}
+                  autoIncome={summary.autoCalculatedIncomeByAccount[account]}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="py-24 flex flex-col items-center justify-center bg-white/40 backdrop-blur-md rounded-[3rem] border border-white/60 shadow-2xl border-dashed">
+            <div className="w-20 h-20 bg-slate-100 rounded-[2rem] flex items-center justify-center text-slate-300 mb-8 border border-slate-200/50">
+              <Inbox size={32} />
+            </div>
+            <h3 className="text-xl font-black text-slate-800 tracking-tight">저장된 자산이 없습니다</h3>
+            <p className="text-slate-400 mt-3 text-center max-w-sm font-medium leading-relaxed text-sm">
+              등록된 자산 데이터가 없습니다. 상단의 버튼을 눌러 당신의 포트폴리오를 구성해보세요.
+            </p>
+            <div className="flex gap-4 mt-10">
+              <button 
+                onClick={() => setIsStockModalOpen(true)}
+                className="px-8 py-4 bg-indigo-50 text-indigo-600 rounded-[1.2rem] font-black text-xs hover:bg-indigo-100 transition-all border border-indigo-100 active:scale-95 flex items-center gap-2"
+              >
+                <TrendingUp size={16} />
+                주식 추가하기
+              </button>
+              <button 
+                onClick={() => setIsBondModalOpen(true)}
+                className="px-8 py-4 bg-violet-50 text-violet-600 rounded-[1.2rem] font-black text-xs hover:bg-violet-100 transition-all border border-violet-100 active:scale-95 flex items-center gap-2"
+              >
+                <ScrollText size={16} />
+                채권 추가하기
+              </button>
             </div>
           </div>
-          <TrendChart data={trendData} title={selectedMetric} subtitle={timeScale} />
-        </div>
-
-        <AIInsightSection advice={advice} isAnalyzing={isAnalyzing} onAnalyze={handleAnalyzePortfolio} />
-
-        <div className="space-y-4">
-          {Object.entries(groupedHoldings).map(([account, assets]) => (
-            <StockTable 
-              key={account} 
-              title={account} 
-              holdings={assets} 
-              isOpen={openAccount === account}
-              onToggle={() => setOpenAccount(openAccount === account ? null : account)}
-              onDelete={(id) => setHoldings(prev => prev.filter(h => h.id !== id))}
-              cashBalance={cashBalances[account] || { krw: 0, usd: 0 }}
-              onUpdateCash={(amount, currency) => handleUpdateCash(account, amount, currency)}
-              onAdjustHolding={handleAdjustHolding}
-              realizedProfit={realizedProfits[account]}
-              portfolioTotalEval={summary.totalEvaluationAmount}
-              autoIncome={summary.autoCalculatedIncomeByAccount[account]}
-            />
-          ))}
-        </div>
+        )}
       </main>
 
-      {/* Cloud Settings Modal */}
       {showCloudSettings && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden border border-white">
@@ -460,7 +501,7 @@ const App: React.FC = () => {
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Google Cloud Client ID</label>
                 <input 
                   type="password" 
-                  placeholder={VITE_GOOGLE_CLIENT_ID ? "환경 변수에서 로드됨 (보호됨)" : "클라이언트 ID를 입력하세요"} 
+                  placeholder={VITE_GOOGLE_CLIENT_ID ? "시스템 설정에서 로드됨" : "클라이언트 ID를 입력하세요"} 
                   disabled={!!VITE_GOOGLE_CLIENT_ID}
                   className={`w-full px-5 py-4 border rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-50 ${VITE_GOOGLE_CLIENT_ID ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-50 text-slate-900 border-slate-200'}`}
                   value={VITE_GOOGLE_CLIENT_ID || googleClientId}
@@ -468,30 +509,21 @@ const App: React.FC = () => {
                 />
                 <p className="text-[9px] text-slate-400 leading-relaxed px-1">
                   {VITE_GOOGLE_CLIENT_ID 
-                    ? "시스템 환경 변수(VITE_GOOGLE_CLIENT_ID)를 우선적으로 사용하고 있습니다."
+                    ? "시스템 환경 변수를 우선적으로 사용하고 있습니다."
                     : "Google Drive 연동을 위해 발급받은 Client ID가 필요합니다."}
                 </p>
               </div>
               <div className="pt-4 flex flex-col gap-3">
                 {!isCloudConnected ? (
-                  <button 
-                    onClick={handleCloudConnect}
-                    className="w-full py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black text-sm hover:bg-indigo-700 shadow-xl shadow-indigo-100"
-                  >
+                  <button onClick={handleCloudConnect} className="w-full py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black text-sm hover:bg-indigo-700 shadow-xl shadow-indigo-100">
                     Google Drive 연결하기
                   </button>
                 ) : (
-                  <button 
-                    onClick={() => { setIsCloudConnected(false); setDriveService(null); }}
-                    className="w-full py-5 bg-rose-50 text-rose-600 rounded-[1.5rem] font-black text-sm hover:bg-rose-100"
-                  >
+                  <button onClick={() => { setIsCloudConnected(false); setDriveService(null); }} className="w-full py-5 bg-rose-50 text-rose-600 rounded-[1.5rem] font-black text-sm hover:bg-rose-100">
                     연결 해제
                   </button>
                 )}
-                <button 
-                  onClick={handleResetData}
-                  className="w-full py-4 text-slate-400 text-xs font-bold hover:text-rose-500 transition-all flex items-center justify-center gap-2"
-                >
+                <button onClick={handleResetData} className="w-full py-4 text-slate-400 text-xs font-bold hover:text-rose-500 transition-all flex items-center justify-center gap-2">
                   <RotateCcw size={14} /> 모든 데이터 초기화
                 </button>
               </div>
