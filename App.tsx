@@ -40,11 +40,16 @@ const STORAGE_KEYS = {
   GOOGLE_CLIENT_ID: 'portfolio_google_client_id'
 };
 
+// Vite 환경 변수에서 구글 클라이언트 ID 로드
+// FIX: Typecast import.meta to any to resolve TS error where 'env' property is not recognized
+const VITE_GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
+
 const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // 구글 드라이브 관련 상태
-  const [googleClientId, setGoogleClientId] = useState(() => localStorage.getItem(STORAGE_KEYS.GOOGLE_CLIENT_ID) || '');
+  // 환경 변수값이 있으면 이를 기본값으로 사용하고, 없으면 localStorage에서 로드함
+  const [googleClientId, setGoogleClientId] = useState(() => VITE_GOOGLE_CLIENT_ID || localStorage.getItem(STORAGE_KEYS.GOOGLE_CLIENT_ID) || '');
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [showCloudSettings, setShowCloudSettings] = useState(false);
@@ -78,27 +83,35 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.CASH, JSON.stringify(cashBalances));
   }, [holdings, realizedProfits, cashBalances]);
 
-  // 구글 클라이언트 ID 저장 시 서비스 초기화
+  // 구글 클라이언트 ID 변경 시 서비스 초기화 (import.meta.env 우선 적용)
   useEffect(() => {
-    if (googleClientId) {
-      localStorage.setItem(STORAGE_KEYS.GOOGLE_CLIENT_ID, googleClientId);
-      const service = new GoogleDriveService(googleClientId);
-      service.initGapi();
+    const finalClientId = VITE_GOOGLE_CLIENT_ID || googleClientId;
+    if (finalClientId) {
+      if (!VITE_GOOGLE_CLIENT_ID) {
+        localStorage.setItem(STORAGE_KEYS.GOOGLE_CLIENT_ID, finalClientId);
+      }
+      const service = new GoogleDriveService(finalClientId);
+      service.initGapi().catch(err => console.error("GAPI 초기화 실패:", err));
       setDriveService(service);
     }
   }, [googleClientId]);
 
   const handleCloudConnect = () => {
     if (!driveService) {
-      alert("먼저 구글 클라이언트 ID를 설정해주세요.");
+      alert("구글 클라이언트 ID가 설정되지 않았습니다. 환경 변수(VITE_GOOGLE_CLIENT_ID) 또는 설정 메뉴를 확인해주세요.");
       setShowCloudSettings(true);
       return;
     }
-    driveService.initTokenClient((resp) => {
-      setIsCloudConnected(true);
-      handlePullFromCloud(); // 연결 시 자동으로 데이터 확인
-    });
-    driveService.requestToken();
+    try {
+      driveService.initTokenClient((resp) => {
+        setIsCloudConnected(true);
+        handlePullFromCloud(); 
+      });
+      driveService.requestToken();
+    } catch (error) {
+      console.error("클라우드 연결 오류:", error);
+      alert("구글 로그인 초기화 중 오류가 발생했습니다. 클라이언트 ID가 올바른지 확인해주세요.");
+    }
   };
 
   const handlePushToCloud = async () => {
@@ -216,7 +229,6 @@ const App: React.FC = () => {
       totalDividendsOrInterest += (h.dividendsReceived + automatedIncome) * rate;
     });
 
-    // Fix: Explicitly cast entries and values to handle potentially loose TypeScript inference from Object methods
     const totalCashKRW = (Object.entries(cashBalances) as [string, CashBalance][]).reduce((sum: number, [account, cash]) => {
       const autoIncome = autoCalculatedIncomeByAccount[account] || { krw: 0, usd: 0 };
       return sum + (cash.krw + autoIncome.krw) + ((cash.usd + autoIncome.usd) * EXCHANGE_RATE);
@@ -387,7 +399,6 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* 대시보드 및 나머지 UI 동일... */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-12">
           <DashboardCard title="자산 총액" value={formatKRW(summary.totalEvaluationAmount)} icon={<Wallet size={20} />} isActive={selectedMetric === 'totalAsset'} onClick={() => setSelectedMetric('totalAsset')} />
           <DashboardCard title="전체 예수금" value={formatKRW(summary.totalCash)} icon={<Banknote size={20} />} isActive={selectedMetric === 'totalCash'} onClick={() => setSelectedMetric('totalCash')} />
@@ -449,14 +460,16 @@ const App: React.FC = () => {
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Google Cloud Client ID</label>
                 <input 
                   type="password" 
-                  placeholder="클라이언트 ID를 입력하세요" 
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-50"
-                  value={googleClientId}
+                  placeholder={VITE_GOOGLE_CLIENT_ID ? "환경 변수에서 로드됨 (보호됨)" : "클라이언트 ID를 입력하세요"} 
+                  disabled={!!VITE_GOOGLE_CLIENT_ID}
+                  className={`w-full px-5 py-4 border rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-50 ${VITE_GOOGLE_CLIENT_ID ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-50 text-slate-900 border-slate-200'}`}
+                  value={VITE_GOOGLE_CLIENT_ID || googleClientId}
                   onChange={(e) => setGoogleClientId(e.target.value)}
                 />
                 <p className="text-[9px] text-slate-400 leading-relaxed px-1">
-                  Google Drive 연동을 위해 발급받은 Client ID가 필요합니다. 
-                  <a href="https://console.cloud.google.com/" target="_blank" className="text-indigo-600 underline ml-1">Google Console</a>에서 생성 가능합니다.
+                  {VITE_GOOGLE_CLIENT_ID 
+                    ? "시스템 환경 변수(VITE_GOOGLE_CLIENT_ID)를 우선적으로 사용하고 있습니다."
+                    : "Google Drive 연동을 위해 발급받은 Client ID가 필요합니다."}
                 </p>
               </div>
               <div className="pt-4 flex flex-col gap-3">
