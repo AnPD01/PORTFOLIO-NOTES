@@ -34,12 +34,6 @@ import { getPortfolioAdvice } from './services/geminiService';
 import { GoogleDriveService } from './services/googleDriveService';
 
 const EXCHANGE_RATE = 1350;
-const STORAGE_KEYS = {
-  HOLDINGS: 'portfolio_holdings_v1',
-  PROFITS: 'portfolio_realized_profits_v1',
-  CASH: 'portfolio_cash_balances_v1',
-  GOOGLE_CLIENT_ID: 'portfolio_google_client_id'
-};
 
 const VITE_GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
 
@@ -48,44 +42,27 @@ const App: React.FC = () => {
   
   const [isAppLoading, setIsAppLoading] = useState(true);
 
-  const [googleClientId, setGoogleClientId] = useState(() => VITE_GOOGLE_CLIENT_ID || localStorage.getItem(STORAGE_KEYS.GOOGLE_CLIENT_ID) || '');
+  const [googleClientId, setGoogleClientId] = useState(() => VITE_GOOGLE_CLIENT_ID || '');
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [showCloudSettings, setShowCloudSettings] = useState(false);
   const [driveService, setDriveService] = useState<GoogleDriveService | null>(null);
 
-  const [holdings, setHoldings] = useState<AssetHolding[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.HOLDINGS);
-    return saved ? JSON.parse(saved) : INITIAL_HOLDINGS;
-  });
-
-  const [realizedProfits, setRealizedProfits] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.PROFITS);
-    return saved ? JSON.parse(saved) : {};
-  });
-
-  const [cashBalances, setCashBalances] = useState<Record<string, CashBalance>>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.CASH);
-    return saved ? JSON.parse(saved) : {};
-  });
+  // 로컬 스토리지 로직 제거: 항상 초기 데이터(INITIAL_HOLDINGS)로 시작
+  const [holdings, setHoldings] = useState<AssetHolding[]>(INITIAL_HOLDINGS);
+  const [realizedProfits, setRealizedProfits] = useState<Record<string, number>>({});
+  const [cashBalances, setCashBalances] = useState<Record<string, CashBalance>>({});
 
   useEffect(() => {
     const timer = setTimeout(() => setIsAppLoading(false), 800);
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.HOLDINGS, JSON.stringify(holdings));
-    localStorage.setItem(STORAGE_KEYS.PROFITS, JSON.stringify(realizedProfits));
-    localStorage.setItem(STORAGE_KEYS.CASH, JSON.stringify(cashBalances));
-  }, [holdings, realizedProfits, cashBalances]);
+  // 로컬 스토리지 자동 저장 useEffect 제거함
 
   useEffect(() => {
     const finalClientId = VITE_GOOGLE_CLIENT_ID || googleClientId;
     if (finalClientId) {
-      if (!VITE_GOOGLE_CLIENT_ID) {
-        localStorage.setItem(STORAGE_KEYS.GOOGLE_CLIENT_ID, finalClientId);
-      }
       const service = new GoogleDriveService(finalClientId);
       service.initGapi().catch(err => console.error("GAPI 초기화 실패:", err));
       setDriveService(service);
@@ -282,9 +259,11 @@ const App: React.FC = () => {
   };
 
   const handleResetData = () => {
-    if (window.confirm("모든 데이터를 초기화하시겠습니까?")) {
-      localStorage.clear();
-      window.location.reload();
+    if (window.confirm("현재 세션의 모든 데이터를 초기화하시겠습니까?")) {
+      setHoldings([]);
+      setRealizedProfits({});
+      setCashBalances({});
+      setAdvice('');
     }
   };
 
@@ -370,8 +349,10 @@ const App: React.FC = () => {
                 onClick={() => setIsBondModalOpen(true)}
                 className="flex items-center gap-2 px-6 py-3.5 bg-violet-50 text-violet-600 rounded-[1.2rem] hover:bg-violet-100 transition-all font-black text-[11px] uppercase tracking-wider border border-violet-100 active:scale-95"
               >
-                <ScrollText size={16} />
-                <span>채권 추가</span>
+                <div className="flex items-center gap-2">
+                   <ScrollText size={16} />
+                   <span>채권 추가</span>
+                </div>
               </button>
             </div>
           </div>
@@ -392,13 +373,8 @@ const App: React.FC = () => {
               {EXCHANGE_RATE.toLocaleString()} KRW/USD
             </span>
           </div>
-
-          <div className="flex items-center gap-3 px-5 py-3 bg-white border border-slate-100 rounded-2xl shadow-sm">
-            <div className={`w-2 h-2 rounded-full animate-pulse ${isCloudConnected ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest tabular-nums">
-              {isCloudConnected ? 'CLOUD SYNC ACTIVE' : 'LOCAL STORAGE'}
-            </span>
-          </div>
+          
+          {/* STORAGE STATUS 배지 제거됨 */}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-12">
@@ -464,7 +440,7 @@ const App: React.FC = () => {
             </div>
             <h3 className="text-xl font-black text-slate-800 tracking-tight">저장된 자산이 없습니다</h3>
             <p className="text-slate-400 mt-3 text-center max-w-sm font-medium leading-relaxed text-sm">
-              등록된 자산 데이터가 없습니다. 상단의 버튼을 눌러 당신의 포트폴리오를 구성해보세요.
+              현재 세션에 등록된 자산 데이터가 없습니다. 상단의 버튼을 눌러 당신의 포트폴리오를 구성해보세요.
             </p>
             <div className="flex gap-4 mt-10">
               <button 

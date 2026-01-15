@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { X, TrendingUp, Wallet, Coins, Activity, BarChart2, PieChart, ArrowUpRight, Percent, CircleDollarSign, History, Calendar, PlusCircle, MinusCircle, Sparkles, Timer, Plus, Minus } from 'lucide-react';
+import { X, TrendingUp, Wallet, Coins, Activity, BarChart2, PieChart, ArrowUpRight, Percent, History, Timer, Plus, Minus, Hash } from 'lucide-react';
 import { 
   ComposedChart, 
   Line, 
@@ -10,7 +10,8 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer
+  ResponsiveContainer,
+  Legend
 } from 'recharts';
 import { StockHolding, MarketType } from '../types';
 
@@ -27,16 +28,16 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
   const dividends = stock.dividendsReceived;
   const divYield = stock.dividendYield || 0;
 
-  // 12개월 평균값 (1개월 단위 표준 성과)
+  const totalReturn = pl + dividends;
+  const totalReturnRate = buyAmt > 0 ? (totalReturn / buyAmt) * 100 : 0;
+
+  // 12개월 평균값
   const avgMonthlyROI = plRate / 12;
   const avgMonthlyDiv = dividends / 12;
   const avgMonthlyYield = divYield / 12;
-
-  const totalReturn = pl + dividends;
-  const totalReturnRate = buyAmt > 0 ? (totalReturn / buyAmt) * 100 : 0;
   const avgMonthlyTotalROI = totalReturnRate / 12;
 
-  // 메인 차트 데이터
+  // 차트 데이터 구성 (매수 시점 vs 현재 시점)
   const chartData = useMemo(() => {
     const pDate = new Date(stock.purchaseDate).toISOString().split('T')[0].substring(2).replace(/-/g, '.');
     const todayStr = new Date().toISOString().split('T')[0].substring(2).replace(/-/g, '.');
@@ -44,22 +45,18 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
     return [
       {
         date: pDate,
-        purchase: buyAmt,
         evaluation: buyAmt,
-        profit: 0,
-        price: stock.avgPurchasePrice,
-        quantity: stock.quantity
+        totalReturn: 0,
+        quantity: stock.quantity,
       },
       {
         date: todayStr,
-        purchase: buyAmt,
         evaluation: evalAmt,
-        profit: pl,
-        price: stock.currentPrice,
-        quantity: stock.quantity
+        totalReturn: totalReturn,
+        quantity: stock.quantity,
       }
     ];
-  }, [stock, buyAmt, evalAmt, pl]);
+  }, [stock, buyAmt, evalAmt, totalReturn]);
 
   const tradeHistory = useMemo(() => {
     return [
@@ -88,10 +85,10 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
     { label: '평가수익률', value: formatPercent(plRate), icon: <Activity size={12}/>, color: getTrendValueColor(plRate), monthlyAvg: formatPercent(avgMonthlyROI) },
     { label: '배당금', value: formatCurrency(dividends), icon: <Coins size={12}/>, color: 'text-emerald-600', monthlyAvg: formatCurrency(avgMonthlyDiv) },
     { label: '배당수익률', value: formatPercent(divYield), icon: <Percent size={12}/>, color: 'text-emerald-500', monthlyAvg: formatPercent(avgMonthlyYield) },
-    { label: '매도수익', value: formatCurrency(0), icon: <ArrowUpRight size={12}/>, color: 'text-slate-400' },
-    { label: '매도수익률', value: formatPercent(0), icon: <BarChart2 size={12}/>, color: 'text-slate-400' },
     { label: '총 수익', value: formatCurrency(totalReturn), icon: <TrendingUp size={12}/>, color: getTrendValueColor(totalReturn) },
     { label: '총 수익률', value: formatPercent(totalReturnRate), icon: <PieChart size={12}/>, color: getTrendValueColor(totalReturnRate), monthlyAvg: formatPercent(avgMonthlyTotalROI) },
+    { label: '보유 수량', value: `${stock.quantity.toLocaleString()}주`, icon: <Hash size={12}/>, color: 'text-amber-600' },
+    { label: '매수 평단', value: formatCurrency(stock.avgPurchasePrice), icon: <History size={12}/>, color: 'text-slate-400' },
   ];
 
   return (
@@ -159,24 +156,14 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
             <div className="lg:col-span-2 bg-white/50 border border-white rounded-[2.5rem] p-8 shadow-sm backdrop-blur-md">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
                 <div>
-                  <h3 className="text-base font-black text-slate-900 tracking-tight">Portfolio Performance</h3>
-                  <p className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-[0.2em]">RECORDED ASSET EVALUATION</p>
-                </div>
-                <div className="flex gap-4">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full border border-indigo-600 bg-white"/>
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">EVAL</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-amber-400"/>
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">PRICE</span>
-                  </div>
+                  <h3 className="text-base font-black text-slate-900 tracking-tight">성과 입체 분석</h3>
+                  <p className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-[0.2em]">Evaluation / Return / Quantity Combined</p>
                 </div>
               </div>
               
-              <div className="h-[300px] w-full">
+              <div className="h-[350px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartData} margin={{ top: 10, right: 30, bottom: 0, left: 10 }}>
+                  <ComposedChart data={chartData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                     <defs>
                       <linearGradient id="colorEval" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
@@ -188,15 +175,26 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
                       dataKey="date" 
                       axisLine={false} 
                       tickLine={false} 
-                      tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} 
+                      tick={{ fontSize: 10, fontWeight: 800, fill: '#94a3b8' }} 
                       dy={10}
                     />
+                    {/* 좌측 Y축: 금액 (평가액, 수익) */}
                     <YAxis 
                       yAxisId="left" 
                       axisLine={false} 
                       tickLine={false} 
-                      tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} 
+                      tick={{ fontSize: 9, fontWeight: 800, fill: '#6366f1' }} 
                       tickFormatter={(val) => new Intl.NumberFormat('ko-KR', { notation: 'compact' }).format(val)}
+                      label={{ value: '금액', angle: -90, position: 'insideLeft', style: { fontSize: '10px', fontWeight: 900, fill: '#94a3b8' } }}
+                    />
+                    {/* 우측 Y축: 수량 */}
+                    <YAxis 
+                      yAxisId="right" 
+                      orientation="right"
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 9, fontWeight: 800, fill: '#f59e0b' }} 
+                      label={{ value: '수량', angle: 90, position: 'insideRight', style: { fontSize: '10px', fontWeight: 900, fill: '#94a3b8' } }}
                     />
                     <Tooltip 
                       contentStyle={{ 
@@ -208,33 +206,56 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
                         padding: '16px' 
                       }}
                       labelStyle={{ fontWeight: 900, marginBottom: '6px', color: '#1e293b', fontSize: '12px' }}
-                      itemStyle={{ fontSize: '11px', fontWeight: 700, padding: '1px 0' }}
+                      itemStyle={{ fontSize: '11px', fontWeight: 700, padding: '2px 0' }}
+                      formatter={(value: any, name: string) => {
+                        if (name === '보유 수량') return [`${value.toLocaleString()}주`, name];
+                        return [formatCurrency(Number(value)), name];
+                      }}
                     />
+                    <Legend 
+                      verticalAlign="top" 
+                      height={36} 
+                      wrapperStyle={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}
+                    />
+                    
+                    {/* 총 평가금액 (영역) */}
                     <Area 
                       yAxisId="left" 
+                      name="총 평가금액"
                       type="monotone" 
                       dataKey="evaluation" 
                       fill="url(#colorEval)" 
                       stroke="#6366f1" 
                       strokeWidth={3} 
                       dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
-                      activeDot={{ r: 6, strokeWidth: 0 }}
                     />
-                    <Line 
+                    
+                    {/* 총 수익 (막대) */}
+                    <Bar 
                       yAxisId="left" 
-                      type="monotone" 
-                      dataKey="price" 
+                      name="총 수익"
+                      dataKey="totalReturn" 
+                      barSize={40}
+                      fill={totalReturn >= 0 ? "#10b981" : "#ef4444"}
+                      radius={[6, 6, 0, 0]}
+                    />
+
+                    {/* 보유 수량 (우측 Y축 선) */}
+                    <Line 
+                      yAxisId="right" 
+                      name="보유 수량"
+                      type="step" 
+                      dataKey="quantity" 
                       stroke="#f59e0b" 
-                      strokeWidth={2} 
-                      dot={false}
-                      strokeDasharray="4 4"
+                      strokeWidth={3} 
+                      dot={{ r: 5, fill: '#f59e0b', strokeWidth: 2, stroke: '#fff' }}
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            {/* Trading History Section - Compact Timeline */}
+            {/* Trading History Section */}
             <div className="bg-white/40 border border-white rounded-[2.5rem] p-6 shadow-sm backdrop-blur-md overflow-hidden relative">
               <div className="flex items-center gap-3 mb-8 relative z-10">
                 <div className="p-2 bg-slate-900 text-white rounded-xl shadow-lg">
@@ -246,16 +267,13 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
                 </div>
               </div>
 
-              {/* Timeline Line adjusted to left */}
               <div className="space-y-5 relative before:absolute before:inset-0 before:left-[10px] before:w-px before:bg-slate-100/80 before:z-0 ml-1">
                 {tradeHistory.map((trade) => (
                   <div key={trade.id} className="relative z-10 flex items-center gap-3 group">
-                    {/* Compact Circle Indicator - Reduced size by half */}
                     <div className={`w-5 h-5 rounded-full flex items-center justify-center border-2 border-white shadow-sm flex-shrink-0 transition-transform group-hover:scale-125 z-10 ${trade.type === '매수' ? 'bg-rose-500 text-white' : 'bg-blue-500 text-white'}`}>
                       {trade.type === '매수' ? <Plus size={8} strokeWidth={5} /> : <Minus size={8} strokeWidth={5} />}
                     </div>
                     
-                    {/* Compact Transaction Card */}
                     <div className="flex-1 bg-white/60 p-3.5 rounded-2xl border border-white/60 flex items-center justify-between group-hover:bg-white group-hover:shadow-md group-hover:border-indigo-100 transition-all min-w-0">
                       <div className="flex flex-col min-w-0">
                         <span className="text-[11px] font-black text-slate-800 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis block">
@@ -279,15 +297,6 @@ const StockDetailModal: React.FC<StockDetailModalProps> = ({ stock, onClose }) =
                   </div>
                 ))}
               </div>
-
-              {tradeHistory.length === 0 && (
-                <div className="py-20 flex flex-col items-center justify-center text-center">
-                  <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-200 mb-4 border border-slate-100 border-dashed">
-                     <History size={20} />
-                  </div>
-                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No transactions yet</p>
-                </div>
-              )}
             </div>
           </div>
         </div>
