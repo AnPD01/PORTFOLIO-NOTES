@@ -33,7 +33,8 @@ const DashboardCard: React.FC<DashboardCardProps> = ({ title, value, subValue, i
           {title}
         </span>
         <div className={`p-1.5 rounded-lg transition-all duration-300 ${isActive ? 'bg-white/20 text-white' : 'bg-white/70 text-slate-400 group-hover:text-indigo-500 shadow-sm border border-slate-100'}`}>
-          {React.cloneElement(icon as React.ReactElement, { size: 14 })}
+          {/* Fix: Check if icon exists and is a valid React element, then cast to allow the 'size' property to avoid TS error */}
+          {icon && React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { size: 14 }) : icon}
         </div>
       </div>
       <div className="overflow-hidden">
