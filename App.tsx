@@ -30,7 +30,9 @@ import {
   ShieldAlert,
   Fingerprint,
   Wrench,
-  HelpCircle
+  HelpCircle,
+  ShieldQuestion,
+  Key
 } from 'lucide-react';
 import { INITIAL_HOLDINGS } from './constants';
 import { AssetHolding, MarketType, AssetType, CashBalance } from './types';
@@ -54,7 +56,6 @@ const App: React.FC = () => {
 
   const [googleClientId, setGoogleClientId] = useState(() => (VITE_GOOGLE_CLIENT_ID || localStorage.getItem('google_client_id') || '').trim());
   
-  // 클라우드 상태 관리
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [isStorageReady, setIsStorageReady] = useState(false); 
   const [isPermissionDenied, setIsPermissionDenied] = useState(false); 
@@ -101,7 +102,7 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [holdings, realizedProfits, cashBalances, isCloudConnected, isStorageReady]);
 
-  const handleCloudConnect = async () => {
+  const handleCloudConnect = async (forceReset = false) => {
     setIsPermissionDenied(false);
     setIsStorageReady(false);
 
@@ -117,8 +118,10 @@ const App: React.FC = () => {
     const service = driveService || new GoogleDriveService(googleClientId);
     if (!driveService) setDriveService(service);
 
-    // 권한 재요청을 위해 기존 토큰 무효화 시도
-    await service.revokeToken();
+    // 만약 강제 리셋이나 권한 거부 상태라면 기존 세션 무효화 후 다시 시작
+    if (forceReset || isPermissionDenied) {
+      await service.revokeToken();
+    }
 
     service.initTokenClient(async (resp) => {
       if (!service.hasRequiredScopes(resp)) {
@@ -365,7 +368,7 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="space-y-4">
-              <button onClick={handleCloudConnect} disabled={!googleClientId || !scriptStatus.gsi} className={`w-full py-7 flex items-center justify-center gap-3 rounded-[2.2rem] font-black text-base transition-all shadow-2xl active:scale-95 ${!googleClientId || !scriptStatus.gsi ? 'bg-slate-100 text-slate-300' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200'}`}><LogIn size={24} />구글 계정으로 연결하기</button>
+              <button onClick={() => handleCloudConnect()} disabled={!googleClientId || !scriptStatus.gsi} className={`w-full py-7 flex items-center justify-center gap-3 rounded-[2.2rem] font-black text-base transition-all shadow-2xl active:scale-95 ${!googleClientId || !scriptStatus.gsi ? 'bg-slate-100 text-slate-300' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200'}`}><LogIn size={24} />구글 계정으로 연결하기</button>
               <p className="text-[10px] text-center text-slate-400 font-bold">연결 후 권한 승인 창에서 체크박스를 모두 선택해 주세요.</p>
             </div>
           </div>
@@ -378,66 +381,48 @@ const App: React.FC = () => {
   if (isPermissionDenied || !isStorageReady) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 overflow-y-auto">
-        <div className="max-w-3xl w-full bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-10 animate-in zoom-in-95 duration-500">
-          <div className="p-10 text-center flex flex-col items-center">
-            <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-[1.5rem] flex items-center justify-center mb-6 shadow-xl shadow-rose-100/50">
-              <ShieldAlert size={32} />
+        <div className="max-w-xl w-full bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-10 animate-in zoom-in-95 duration-500">
+          <div className="p-12 text-center flex flex-col items-center">
+            <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-[2rem] flex items-center justify-center mb-8 shadow-xl shadow-indigo-100/50">
+              <ShieldQuestion size={40} />
             </div>
-            <h2 className="text-2xl font-black text-slate-900 leading-tight tracking-tight mb-3">드라이브 권한을 설정할 수 없습니다</h2>
-            <p className="text-slate-500 font-medium leading-relaxed px-6 text-sm">
-              구글 로그인 창에서 <span className="text-indigo-600 font-bold">'파일 관리' 체크박스</span>가 나타나지 않거나 승인되지 않았습니다.
+            <h2 className="text-3xl font-black text-slate-900 leading-tight tracking-tight mb-4">드라이브 권한 승인</h2>
+            <p className="text-slate-500 font-medium leading-relaxed px-6 text-base">
+              구글 드라이브에 데이터를 저장하려면<br/>
+              <span className="text-indigo-600 font-extrabold underline decoration-indigo-200 underline-offset-4">권한 요청 창의 모든 체크박스</span>를 선택해야 합니다.
             </p>
           </div>
 
-          <div className="px-10 pb-12 space-y-6">
-            {/* 해결 가이드 1: 클라이언트 측 */}
-            <div className="p-8 bg-indigo-50/50 rounded-[2.5rem] border border-indigo-100 space-y-4">
-              <h3 className="text-[11px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2">
-                <Wrench size={14} /> Step 1. 앱 설정 점검
-              </h3>
-              <div className="space-y-3">
-                <div className="flex items-start gap-4 p-4 bg-white rounded-2xl border border-indigo-100 shadow-sm">
-                  <div className="p-1 bg-indigo-600 text-white rounded-md mt-0.5"><SquareCheck size={14} /></div>
-                  <p className="text-[11px] font-bold text-slate-700 leading-snug">로그인 시 나타나는 권한 요청 목록에서 모든 항목을 수동으로 체크해야 합니다.</p>
+          <div className="px-12 pb-14 space-y-6">
+            <div className="p-8 bg-indigo-50/50 rounded-[2.5rem] border-2 border-dashed border-indigo-200 flex flex-col items-center gap-4 text-center">
+                <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-indigo-600 shadow-sm">
+                  <SquareCheck size={20} />
                 </div>
-                <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-indigo-100 shadow-sm">
-                  <div className="flex items-center gap-3"><Fingerprint size={16} className="text-slate-400" /><span className="text-[10px] font-black text-slate-600 uppercase">JS Origin</span></div>
-                  <button onClick={copyOriginToClipboard} className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${isOriginCopied ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>{isOriginCopied ? '복사됨' : '도메인 복사'}</button>
-                </div>
-              </div>
+                <p className="text-[11px] font-black text-slate-600 leading-normal uppercase tracking-tight">
+                  "See, edit, create, and delete only the specific Google Drive files you use with this app"
+                </p>
             </div>
 
-            {/* 해결 가이드 2: 구글 콘솔 측 (체크박스가 안 뜨는 근본 원인) */}
-            <div className="p-8 bg-amber-50/50 rounded-[2.5rem] border border-amber-100 space-y-4">
-              <h3 className="text-[11px] font-black text-amber-600 uppercase tracking-[0.2em] flex items-center gap-2">
-                <HelpCircle size={14} /> Step 2. 체크박스가 아예 안 뜨나요?
-              </h3>
-              <p className="text-[10px] font-bold text-amber-700 leading-relaxed px-1">
-                구글 클라우드 콘솔에서 아래 사항이 설정되어 있는지 확인하세요:
-              </p>
-              <ul className="space-y-2">
-                {[
-                  "API 및 서비스 > 라이브러리에서 'Google Drive API'를 활성화했나요?",
-                  "OAuth 동의 화면 > 범위(Scopes)에 '.../auth/drive.file'을 추가했나요?",
-                  "사용자 인증 정보 > OAuth 클라이언트 ID 형식이 '웹 애플리케이션'인가요?"
-                ].map((text, i) => (
-                  <li key={i} className="flex items-start gap-3 text-[10px] font-bold text-slate-600">
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 flex-shrink-0"></div>
-                    {text}
-                  </li>
-                ))}
-              </ul>
-              <a href="https://console.cloud.google.com/" target="_blank" className="inline-flex items-center gap-2 text-[10px] font-black text-amber-600 underline underline-offset-4 mt-2">구글 콘솔 바로가기 <ExternalLink size={12}/></a>
+            <div className="flex flex-col gap-4">
+              <button 
+                onClick={() => handleCloudConnect(true)} 
+                className="w-full py-7 bg-indigo-600 text-white rounded-[2.2rem] font-black text-lg hover:bg-indigo-700 shadow-2xl shadow-indigo-200 transition-all flex items-center justify-center gap-4 active:scale-95 group"
+              >
+                <Key size={24} /> 드라이브 권한 승인하기
+              </button>
+              
+              <button 
+                onClick={handleFullReset} 
+                className="w-full py-5 bg-slate-50 text-slate-400 rounded-[1.8rem] font-black text-xs hover:bg-slate-100 transition-all flex items-center justify-center gap-3 active:scale-95"
+              >
+                <Settings size={16} /> 설정 초기화 (처음부터 다시)
+              </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 pt-4">
-              <button onClick={handleCloudConnect} className="py-6 bg-indigo-600 text-white rounded-[2.2rem] font-black text-sm hover:bg-indigo-700 shadow-xl shadow-indigo-100 transition-all flex items-center justify-center gap-3 active:scale-95 group">
-                <RotateCcw size={18} className="group-hover:rotate-180 transition-transform duration-700" /> 세션 재시작
-              </button>
-              <button onClick={handleFullReset} className="py-6 bg-slate-900 text-white rounded-[2.2rem] font-black text-sm hover:bg-slate-800 shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95">
-                <Settings size={18} /> 설정 초기화
-              </button>
-            </div>
+            <p className="text-[10px] text-center text-slate-400 font-bold leading-relaxed">
+              * 버튼을 누르면 계정 선택 후 체크박스가 포함된 동의 화면이 나타납니다.<br/>
+              반드시 항목을 체크하고 [계속]을 눌러주세요.
+            </p>
           </div>
         </div>
       </div>

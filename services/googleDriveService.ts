@@ -51,23 +51,35 @@ export class GoogleDriveService {
   }
 
   hasRequiredScopes(response: any): boolean {
+    // GSI response can have scope or granted_scopes
     const grantedScopes = response.scope || response.granted_scopes || '';
     if (!grantedScopes) return false;
     
     const decodedScopes = decodeURIComponent(grantedScopes).toLowerCase();
-    return decodedScopes.includes(SCOPES.toLowerCase());
+    const targetScope = SCOPES.toLowerCase();
+    
+    // Check if the specific drive.file scope is included
+    return decodedScopes.split(' ').some(s => s === targetScope);
   }
 
   /**
-   * 기존 인증 세션을 완전히 서버에서 무효화합니다. (권한 재요청용)
+   * 현재 브라우저 세션의 권한을 서버에서 완전히 취소합니다.
+   * 권한 체크박스가 뜨지 않을 때 강제로 재설정하기 위해 사용합니다.
    */
   async revokeToken() {
-    if (this.accessToken) {
-      window.google?.accounts?.oauth2?.revoke(this.accessToken, () => {
-        console.log("Token revoked");
-        this.accessToken = null;
-      });
-    }
+    return new Promise<void>((resolve) => {
+      const token = this.accessToken || window.gapi?.client?.getToken()?.access_token;
+      if (token) {
+        window.google?.accounts?.oauth2?.revoke(token, () => {
+          console.log("Access revoked");
+          this.accessToken = null;
+          if (window.gapi?.client) window.gapi.client.setToken(null);
+          resolve();
+        });
+      } else {
+        resolve();
+      }
+    });
   }
 
   initTokenClient(callback: (resp: any) => void) {
@@ -78,17 +90,21 @@ export class GoogleDriveService {
     this.tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: this.clientId,
       scope: SCOPES,
-      // enable_serial_consent: true -> 권한을 개별적으로 선택할 수 있는 창을 강제함
+      // enable_serial_consent: true -> 권한을 개별적으로 선택할 수 있도록 보장
       enable_serial_consent: true,
       callback: (resp: any) => {
         if (resp.error) {
           console.error("Token client error:", resp.error);
           return;
         }
+        
         this.accessToken = resp.access_token;
+        
+        // GAPI 클라이언트에 토큰 설정
         if (window.gapi?.client) {
           window.gapi.client.setToken({ access_token: resp.access_token });
         }
+        
         callback(resp);
       },
     });
@@ -96,8 +112,11 @@ export class GoogleDriveService {
 
   requestToken() {
     if (!this.tokenClient) throw new Error("Token client not ready");
-    // select_account와 consent를 조합하여 확실하게 동의 창을 띄움
-    this.tokenClient.requestAccessToken({ prompt: 'select_account consent' });
+    // prompt: 'consent'를 명시하여 이미 로그인된 경우에도 권한 체크박스가 반드시 뜨게 함
+    this.tokenClient.requestAccessToken({ 
+      prompt: 'select_account consent',
+      enable_serial_consent: true
+    });
   }
 
   async getOrCreateFolder(): Promise<string> {
@@ -161,7 +180,8 @@ export class GoogleDriveService {
   }
 
   async uploadData(data: CloudData) {
-    if (!this.accessToken) throw new Error("Unauthorized");
+    const token = this.accessToken || window.gapi?.client?.getToken()?.access_token;
+    if (!token) throw new Error("Unauthorized");
 
     try {
       const folderId = await this.getOrCreateFolder();
@@ -171,7 +191,7 @@ export class GoogleDriveService {
       if (fileId) {
         await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
           method: 'PATCH',
-          headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: body,
         });
       } else {
@@ -185,7 +205,7 @@ export class GoogleDriveService {
 
         const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': 'multipart/related; boundary=' + boundary },
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/related; boundary=' + boundary },
           body: multipartRequestBody,
         });
         if (!response.ok) throw new Error("Upload failed");
