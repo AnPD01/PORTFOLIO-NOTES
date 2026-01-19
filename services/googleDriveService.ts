@@ -1,5 +1,5 @@
 
-// Fix: Declare global types for window.gapi and window.google to avoid TypeScript compilation errors
+// Fix: Declare global types for window.gapi and window.google
 declare global {
   interface Window {
     gapi: any;
@@ -32,7 +32,6 @@ export class GoogleDriveService {
   async initGapi() {
     return new Promise<void>((resolve, reject) => {
       if (!window.gapi) {
-        console.error("GAPI script not loaded");
         reject(new Error("GAPI script not loaded"));
         return;
       }
@@ -43,7 +42,6 @@ export class GoogleDriveService {
           });
           resolve();
         } catch (err) {
-          console.error("GAPI client init error:", err);
           reject(err);
         }
       });
@@ -51,42 +49,36 @@ export class GoogleDriveService {
   }
 
   initTokenClient(callback: (resp: any) => void) {
-    if (!window.google || !window.google.accounts || !window.google.accounts.oauth2) {
-      throw new Error("Google Identity Services script not loaded");
+    if (!window.google?.accounts?.oauth2) {
+      throw new Error("Google Identity Services not loaded");
     }
     
     this.tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: this.clientId,
       scope: SCOPES,
       callback: (resp: any) => {
-        if (resp.error) {
-          console.error("OAuth2 error:", resp.error);
-          return;
-        }
+        if (resp.error) return;
         this.accessToken = resp.access_token;
+        // GAPI에 토큰 주입
+        window.gapi.client.setToken({ access_token: resp.access_token });
         callback(resp);
       },
     });
   }
 
   requestToken() {
-    if (!this.tokenClient) {
-      throw new Error("Token client not initialized. Call initTokenClient first.");
-    }
-    this.tokenClient.requestAccessToken({ prompt: 'consent' });
+    this.tokenClient?.requestAccessToken({ prompt: 'consent' });
   }
 
-  /**
-   * 전용 폴더를 찾거나 없으면 생성하여 ID를 반환합니다.
-   */
-  private async getOrCreateFolder(): Promise<string> {
+  async getOrCreateFolder(): Promise<string> {
     if (this.folderId) return this.folderId;
 
     try {
       // 1. 폴더 존재 여부 확인
       const response = await window.gapi.client.drive.files.list({
         q: `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-        fields: 'files(id)',
+        fields: 'files(id, name)',
+        spaces: 'drive'
       });
 
       const folders = response.result.files;
@@ -95,10 +87,11 @@ export class GoogleDriveService {
         return this.folderId!;
       }
 
-      // 2. 폴더가 없으면 생성
+      // 2. 폴더가 없으면 'root'(내 드라이브)에 생성
       const folderMetadata = {
         name: FOLDER_NAME,
         mimeType: 'application/vnd.google-apps.folder',
+        parents: ['root'] 
       };
 
       const createResponse = await window.gapi.client.drive.files.create({
@@ -109,7 +102,7 @@ export class GoogleDriveService {
       this.folderId = createResponse.result.id;
       return this.folderId!;
     } catch (error) {
-      console.error("Error getting/creating folder:", error);
+      console.error("Folder operation failed:", error);
       throw error;
     }
   }
@@ -119,73 +112,48 @@ export class GoogleDriveService {
       const folderId = await this.getOrCreateFolder();
       const response = await window.gapi.client.drive.files.list({
         q: `name = '${FILE_NAME}' and '${folderId}' in parents and trashed = false`,
-        fields: 'files(id, name)',
+        fields: 'files(id)',
       });
       const files = response.result.files;
       return files && files.length > 0 ? files[0].id : null;
     } catch (error) {
-      console.error("Error finding data file:", error);
       return null;
     }
   }
 
   async downloadData(fileId: string): Promise<CloudData | null> {
-    try {
-      const response = await window.gapi.client.drive.files.get({
-        fileId: fileId,
-        alt: 'media',
-      });
-      return response.result as CloudData;
-    } catch (error) {
-      console.error("Error downloading data:", error);
-      return null;
-    }
+    const response = await window.gapi.client.drive.files.get({
+      fileId: fileId,
+      alt: 'media',
+    });
+    return response.result as CloudData;
   }
 
   async uploadData(data: CloudData) {
-    if (!this.accessToken) {
-      throw new Error("No access token available. Please login again.");
-    }
+    if (!this.accessToken) throw new Error("Unauthorized");
 
     const folderId = await this.getOrCreateFolder();
     const fileId = await this.findDataFile();
-    
     const body = JSON.stringify({ ...data, lastSynced: new Date().toISOString() });
 
-    try {
-      if (fileId) {
-        // 기존 파일 업데이트
-        await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: body,
-        });
-      } else {
-        // 새 파일 생성 (전용 폴더를 부모로 지정)
-        const metadata = {
-          name: FILE_NAME,
-          mimeType: 'application/json',
-          parents: [folderId]
-        };
+    if (fileId) {
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+        body: body,
+      });
+    } else {
+      const metadata = { name: FILE_NAME, mimeType: 'application/json', parents: [folderId] };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', new Blob([body], { type: 'application/json' }));
 
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', new Blob([body], { type: 'application/json' }));
-
-        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-          },
-          body: form,
-        });
-      }
-    } catch (error) {
-      console.error("Error uploading data to Drive:", error);
-      throw error;
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.accessToken}` },
+        body: form,
+      });
+      if (!res.ok) throw new Error("Upload failed");
     }
   }
 }
