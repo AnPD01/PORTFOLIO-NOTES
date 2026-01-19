@@ -48,6 +48,14 @@ export class GoogleDriveService {
     });
   }
 
+  /**
+   * 사용자가 필수 권한을 승인했는지 확인합니다.
+   */
+  hasRequiredScopes(response: any): boolean {
+    const grantedScopes = response.scope || '';
+    return grantedScopes.includes(SCOPES);
+  }
+
   initTokenClient(callback: (resp: any) => void) {
     if (!window.google?.accounts?.oauth2) {
       throw new Error("Google Identity Services not loaded");
@@ -59,7 +67,6 @@ export class GoogleDriveService {
       callback: (resp: any) => {
         if (resp.error) return;
         this.accessToken = resp.access_token;
-        // GAPI에 토큰 주입
         window.gapi.client.setToken({ access_token: resp.access_token });
         callback(resp);
       },
@@ -67,14 +74,15 @@ export class GoogleDriveService {
   }
 
   requestToken() {
-    this.tokenClient?.requestAccessToken({ prompt: 'consent' });
+    if (!this.tokenClient) throw new Error("Token client not ready");
+    // prompt: 'consent'를 통해 항상 권한 체크박스 화면이 나오도록 강제합니다.
+    this.tokenClient.requestAccessToken({ prompt: 'consent' });
   }
 
   async getOrCreateFolder(): Promise<string> {
     if (this.folderId) return this.folderId;
 
     try {
-      // 1. 폴더 존재 여부 확인
       const response = await window.gapi.client.drive.files.list({
         q: `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
         fields: 'files(id, name)',
@@ -87,11 +95,10 @@ export class GoogleDriveService {
         return this.folderId!;
       }
 
-      // 2. 폴더가 없으면 'root'(내 드라이브)에 생성
       const folderMetadata = {
         name: FOLDER_NAME,
         mimeType: 'application/vnd.google-apps.folder',
-        parents: ['root'] 
+        parents: ['root']
       };
 
       const createResponse = await window.gapi.client.drive.files.create({
@@ -99,10 +106,15 @@ export class GoogleDriveService {
         fields: 'id',
       });
 
+      if (!createResponse.result.id) throw new Error("Insufficient Permissions");
+      
       this.folderId = createResponse.result.id;
       return this.folderId!;
-    } catch (error) {
-      console.error("Folder operation failed:", error);
+    } catch (error: any) {
+      // 403 에러나 권한 관련 에러 시 상위로 던짐
+      if (error?.status === 403 || error?.result?.error?.status === 'PERMISSION_DENIED') {
+        throw new Error("PERMISSION_DENIED");
+      }
       throw error;
     }
   }
@@ -113,11 +125,12 @@ export class GoogleDriveService {
       const response = await window.gapi.client.drive.files.list({
         q: `name = '${FILE_NAME}' and '${folderId}' in parents and trashed = false`,
         fields: 'files(id)',
+        spaces: 'drive'
       });
       const files = response.result.files;
       return files && files.length > 0 ? files[0].id : null;
     } catch (error) {
-      return null;
+      throw error;
     }
   }
 
@@ -132,28 +145,36 @@ export class GoogleDriveService {
   async uploadData(data: CloudData) {
     if (!this.accessToken) throw new Error("Unauthorized");
 
-    const folderId = await this.getOrCreateFolder();
-    const fileId = await this.findDataFile();
-    const body = JSON.stringify({ ...data, lastSynced: new Date().toISOString() });
+    try {
+      const folderId = await this.getOrCreateFolder();
+      const fileId = await this.findDataFile();
+      const body = JSON.stringify({ ...data, lastSynced: new Date().toISOString() });
 
-    if (fileId) {
-      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
-        body: body,
-      });
-    } else {
-      const metadata = { name: FILE_NAME, mimeType: 'application/json', parents: [folderId] };
-      const form = new FormData();
-      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-      form.append('file', new Blob([body], { type: 'application/json' }));
+      if (fileId) {
+        await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+          body: body,
+        });
+      } else {
+        const metadata = { name: FILE_NAME, mimeType: 'application/json', parents: [folderId] };
+        const boundary = '-------314159265358979323846';
+        const delimiter = "\r\n--" + boundary + "\r\n";
+        const close_delim = "\r\n--" + boundary + "--";
+        const multipartRequestBody =
+            delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) +
+            delimiter + 'Content-Type: application/json\r\n\r\n' + body + close_delim;
 
-      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.accessToken}` },
-        body: form,
-      });
-      if (!res.ok) throw new Error("Upload failed");
+        const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': 'multipart/related; boundary=' + boundary },
+          body: multipartRequestBody,
+        });
+        if (!response.ok) throw new Error("Upload failed");
+      }
+    } catch (error: any) {
+      if (error.message === 'PERMISSION_DENIED') throw error;
+      throw new Error("Sync Failed");
     }
   }
 }
