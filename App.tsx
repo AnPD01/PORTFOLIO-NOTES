@@ -67,7 +67,6 @@ const App: React.FC = () => {
   
   const [showCloudSettings, setShowCloudSettings] = useState(false);
   const [driveService, setDriveService] = useState<GoogleDriveService | null>(null);
-  const [isOriginCopied, setIsOriginCopied] = useState(false);
   
   const skipNextSync = useRef(false);
   const [scriptStatus, setScriptStatus] = useState({ gapi: false, gsi: false });
@@ -96,6 +95,7 @@ const App: React.FC = () => {
     }
   }, [googleClientId, scriptStatus.gapi]);
 
+  // 자동 데이터 저장 (변경 감지 시)
   useEffect(() => {
     if (!isCloudConnected || !isStorageReady || !driveService) return;
     if (skipNextSync.current) {
@@ -141,7 +141,9 @@ const App: React.FC = () => {
         setIsCloudSyncing(true);
         await service.getOrCreateFolder(); 
         setIsStorageReady(true);
-        await handlePullFromCloud(); 
+        
+        // 연결 성공 직후 클라우드 데이터 로드
+        await handlePullFromCloud(true); 
       } catch (e: any) {
         console.error("Cloud Access Error:", e);
         setIsPermissionDenied(true);
@@ -168,7 +170,6 @@ const App: React.FC = () => {
         return h;
       }));
       
-      // 즉시 클라우드 저장 트리거
       setTimeout(() => handlePushToCloud(), 500);
     } catch (e) {
       alert("시세 동기화 중 오류가 발생했습니다.");
@@ -197,20 +198,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePullFromCloud = async () => {
+  const handlePullFromCloud = async (isAutoLoad = false) => {
     if (!driveService || !isCloudConnected || !isStorageReady) return;
     setIsCloudSyncing(true);
     try {
-      const fileId = await driveService.findDataFile();
-      if (fileId) {
-        if (window.confirm("클라우드에 저장된 이전 데이터가 있습니다. 불러오시겠습니까?")) {
-          const data = await driveService.downloadData(fileId);
-          if (data) {
-            skipNextSync.current = true;
-            setHoldings(data.holdings || []);
-            setRealizedProfits(data.realizedProfits || {});
-            setCashBalances(data.cashBalances || {});
-          }
+      // 보강된 loadPortfolioData 호출
+      const data = await driveService.loadPortfolioData();
+      if (data) {
+        if (isAutoLoad || window.confirm("클라우드에 저장된 데이터가 있습니다. 불러오시겠습니까?")) {
+          skipNextSync.current = true;
+          setHoldings(data.holdings || []);
+          setRealizedProfits(data.realizedProfits || {});
+          setCashBalances(data.cashBalances || {});
         }
       }
     } catch (e) {
@@ -218,12 +217,6 @@ const App: React.FC = () => {
     } finally {
       setIsCloudSyncing(false);
     }
-  };
-
-  const copyOriginToClipboard = () => {
-    navigator.clipboard.writeText(window.location.origin);
-    setIsOriginCopied(true);
-    setTimeout(() => setIsOriginCopied(false), 2000);
   };
 
   const handleFullReset = () => {
@@ -493,26 +486,23 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-12">
-          <DashboardCard title="자산 총액" value={formatKRW(summary.totalEvaluationAmount)} icon={<Wallet size={20} />} isActive={selectedMetric === 'totalAsset'} onClick={() => setSelectedMetric('totalAsset')} trend="neutral" />
-          <DashboardCard title="전체 예수금" value={formatKRW(summary.totalCash)} icon={<Banknote size={20} />} isActive={selectedMetric === 'totalCash'} onClick={() => setSelectedMetric('totalCash')} trend="neutral" />
-          <DashboardCard title="미실현 손익" value={formatKRW(summary.totalUnrealizedProfit)} trend={summary.totalUnrealizedProfit >= 0 ? 'up' : 'down'} icon={<TrendingUp size={20} />} isActive={selectedMetric === 'unrealizedProfit'} onClick={() => setSelectedMetric('unrealizedProfit')} />
-          <DashboardCard title="매매 수익" value={formatKRW(summary.totalRealizedProfit)} trend={summary.totalRealizedProfit >= 0 ? 'up' : 'down'} icon={<ArrowUpRight size={20} />} isActive={selectedMetric === 'tradingProfit'} onClick={() => setSelectedMetric('tradingProfit')} />
-          <DashboardCard title="배당/이자" value={formatKRW(summary.totalDividends)} icon={<Coins size={20} />} isActive={selectedMetric === 'dividendIncome'} onClick={() => setSelectedMetric('dividendIncome')} trend="neutral" />
-          <DashboardCard title="종합 수익률" value={summary.totalReturnRate.toFixed(2) + '%'} trend={summary.totalReturnAmount >= 0 ? 'up' : 'down'} icon={<Target size={20} />} isActive={selectedMetric === 'totalReturn'} onClick={() => setSelectedMetric('totalReturn')} />
-        </div>
+        {isCloudSyncing && holdings.length === 0 && (
+           <div className="flex flex-col items-center justify-center py-24 bg-white/40 backdrop-blur-md rounded-[3rem] border border-white/60 shadow-xl mb-12">
+              <Loader2 className="animate-spin text-indigo-600 mb-4" size={32} />
+              <p className="text-sm font-black text-slate-600 uppercase tracking-widest">클라우드 데이터 불러오는 중...</p>
+           </div>
+        )}
 
         {holdings.length > 0 ? (
           <>
             <div className="glass-panel p-10 rounded-[3rem] mb-12 overflow-hidden relative border border-white/60 shadow-2xl"><TrendChart data={trendData} title={selectedMetric} subtitle="(실시간)" /></div>
             <AIInsightSection advice={advice} isAnalyzing={isAnalyzing} onAnalyze={handleAnalyzePortfolio} />
             
-            {/* 시세 검색 출처 표시 */}
             {searchSources.length > 0 && (
               <div className="mb-6 px-8 py-4 bg-slate-50/50 rounded-2xl border border-slate-100 flex items-center gap-4 animate-in fade-in duration-500">
                 <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                   <Link2 size={14} />
-                  <span>Price Sources (Grounding)</span>
+                  <span>Price Sources</span>
                 </div>
                 <div className="flex gap-3 overflow-x-auto scrollbar-hide">
                   {searchSources.map((source, idx) => (
@@ -528,7 +518,7 @@ const App: React.FC = () => {
                 <StockTable key={account} title={account} holdings={assets} isOpen={openAccount === account} onToggle={() => setOpenAccount(openAccount === account ? null : account)} onDelete={(id) => setHoldings(prev => prev.filter(h => h.id !== id))} cashBalance={cashBalances[account] || { krw: 0, usd: 0 }} onUpdateCash={(amount, currency) => handleUpdateCash(account, amount, currency)} onAdjustHolding={handleAdjustHolding} realizedProfit={realizedProfits[account]} portfolioTotalEval={summary.totalEvaluationAmount} autoIncome={summary.autoCalculatedIncomeByAccount[account]} />
               ))}</div>
           </>
-        ) : (
+        ) : !isCloudSyncing && (
           <div className="py-24 flex flex-col items-center justify-center bg-white/40 backdrop-blur-md rounded-[3rem] border border-white/60 shadow-2xl border-dashed text-center">
              <div className="w-20 h-20 bg-slate-100 rounded-[2rem] flex items-center justify-center text-slate-300 mb-8 border border-slate-200/50"><Inbox size={32} /></div>
              <h3 className="text-xl font-black text-slate-800 tracking-tight">자산 데이터가 없습니다</h3>

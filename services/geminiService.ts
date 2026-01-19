@@ -5,52 +5,88 @@ import { AssetHolding, MarketType } from "../types";
 export interface PriceUpdateResult {
   symbol: string;
   price: number;
+  currency: string;
+  regularMarketPrice: number;
+  previousClose: number;
 }
 
+const CORS_PROXY = "https://corsproxy.io/?";
+
+/**
+ * Yahoo Finance API를 통해 개별 종목의 가격 정보를 가져옵니다.
+ * 한국 주식의 경우 .KS(코스피) 시도 후 실패 시 .KQ(코스닥)로 재시도하는 로직을 포함합니다.
+ */
+async function fetchYahooPrice(symbol: string, market: MarketType): Promise<PriceUpdateResult | null> {
+  const isKoreanNumeric = /^\d{6}$/.test(symbol);
+  
+  // 시도할 심볼 목록 생성
+  let symbolsToTry: string[] = [symbol];
+  if (isKoreanNumeric) {
+    symbolsToTry = [`${symbol}.KS`, `${symbol}.KQ`];
+  } else if (market === MarketType.KOREA && !symbol.includes('.')) {
+    symbolsToTry = [`${symbol}.KS`, `${symbol}.KQ`];
+  }
+
+  for (const targetSymbol of symbolsToTry) {
+    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${targetSymbol}?interval=1d&range=1d`;
+    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(yahooUrl)}`;
+
+    try {
+      const response = await fetch(proxyUrl);
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      const meta = data?.chart?.result?.[0]?.meta;
+
+      if (meta && meta.regularMarketPrice) {
+        return {
+          symbol: symbol, // 원본 심볼 반환
+          price: meta.regularMarketPrice,
+          currency: meta.currency,
+          regularMarketPrice: meta.regularMarketPrice,
+          previousClose: meta.chartPreviousClose || meta.regularMarketPrice
+        };
+      }
+    } catch (error) {
+      console.warn(`Yahoo Fetch Error for ${targetSymbol}:`, error);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 포트폴리오의 모든 종목 시세를 Yahoo Finance API로 일괄 업데이트합니다.
+ */
 export const updatePortfolioPrices = async (holdings: AssetHolding[]) => {
   if (holdings.length === 0) return { prices: [], sources: [] };
   
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const symbols = holdings.map(h => `${h.name}(${h.symbol}, ${h.market})`).join(', ');
+  const results: PriceUpdateResult[] = [];
+  
+  // 병렬 처리를 통해 속도 향상
+  const fetchPromises = holdings.map(async (h) => {
+    const data = await fetchYahooPrice(h.symbol, h.market);
+    if (data) {
+      results.push(data);
+    }
+  });
 
-  const prompt = `
-    Find the CURRENT real-time market price for the following financial assets: [${symbols}].
-    For KOREA market assets, provide the price in KRW.
-    For USA market assets, provide the price in USD.
-    Return the data as a JSON array of objects with 'symbol' and 'price'.
-  `;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              symbol: { type: Type.STRING },
-              price: { type: Type.NUMBER }
-            },
-            required: ["symbol", "price"]
-          }
-        }
-      }
-    });
-
-    const prices: PriceUpdateResult[] = JSON.parse(response.text || "[]");
-    const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    
-    return { prices, sources };
-  } catch (error) {
-    console.error("Price Sync Error:", error);
-    throw error;
-  }
+  await Promise.all(fetchPromises);
+  
+  return { 
+    prices: results, 
+    sources: [{ 
+      web: { 
+        uri: "https://finance.yahoo.com", 
+        title: "Yahoo Finance (Official Market Data)" 
+      } 
+    }] 
+  };
 };
 
+/**
+ * 포트폴리오 분석 및 투자 조언 (Gemini Pro 사용)
+ */
 export const getPortfolioAdvice = async (holdings: AssetHolding[]) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -84,6 +120,9 @@ export const getPortfolioAdvice = async (holdings: AssetHolding[]) => {
   }
 };
 
+/**
+ * 채권 상세 정보 조회
+ */
 export interface BondInfoResult {
   name: string;
   couponRate: number;
@@ -98,9 +137,9 @@ export const lookupBondInfo = async (symbol: string): Promise<BondInfoResult | n
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Search for the detailed specifications of the bond with code/ISIN: "${symbol}". You must find the 'Coupon Rate' (annual interest rate) accurately.`,
+      contents: `Search for the detailed specifications of the bond with code/ISIN: "${symbol}".`,
       config: {
-        systemInstruction: "You are a professional financial data extractor. Given a bond ISIN or code, return its EXACT details in JSON. 'name' is the full Korean name, 'couponRate' is the annual interest rate as a numeric percentage (e.g., 4.25), 'maturityDate' is YYYY-MM-DD, and 'faceValue' is the par value (default 10000).",
+        systemInstruction: "You are a professional financial data extractor. Given a bond ISIN or code, return its EXACT details in JSON. 'name' is the full Korean name, 'couponRate' is numeric percentage, 'maturityDate' is YYYY-MM-DD, and 'faceValue' is par value.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -110,7 +149,7 @@ export const lookupBondInfo = async (symbol: string): Promise<BondInfoResult | n
             maturityDate: { type: Type.STRING },
             faceValue: { type: Type.NUMBER }
           },
-          propertyOrdering: ['name', 'couponRate', 'maturityDate', 'faceValue']
+          required: ['name', 'couponRate', 'maturityDate', 'faceValue']
         }
       }
     });
@@ -121,6 +160,9 @@ export const lookupBondInfo = async (symbol: string): Promise<BondInfoResult | n
   }
 };
 
+/**
+ * 종목 검색 및 배당 정보 추출
+ */
 export interface StockSearchResult {
   symbol: string;
   name: string;
@@ -136,9 +178,9 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Search for stocks or ETFs matching the query: "${query}". Return at most 5 best matches. For each stock, you MUST find the actual official dividend yield of the previous year.`,
+      contents: `Search for stocks or ETFs matching: "${query}".`,
       config: {
-        systemInstruction: "You are a stock search assistant. Return a JSON array of objects. Each object has: 'symbol', 'name', 'market' (must be 'KOREA' or 'USA'), 'currentPriceEstimate' (number, in local currency), and 'dividendYield' (number, the annual dividend yield of the previous year in percentage, e.g., 2.5). If it's a Korean stock, provide the 6-digit code as symbol. If US, provide the ticker.",
+        systemInstruction: "Return a JSON array of up to 5 stock matches. Symbol for KR should be 6 digits. Market must be 'KOREA' or 'USA'. Include 'dividendYield' in percentage.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -151,14 +193,13 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
               currentPriceEstimate: { type: Type.NUMBER },
               dividendYield: { type: Type.NUMBER }
             },
-            propertyOrdering: ['symbol', 'name', 'market', 'currentPriceEstimate', 'dividendYield']
+            required: ['symbol', 'name', 'market', 'currentPriceEstimate', 'dividendYield']
           }
         }
       }
     });
 
-    const results = JSON.parse(response.text || "[]");
-    return results;
+    return JSON.parse(response.text || "[]");
   } catch (error) {
     console.error("Stock Search Error:", error);
     return [];
