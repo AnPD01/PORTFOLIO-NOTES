@@ -32,7 +32,9 @@ import {
   Wrench,
   HelpCircle,
   ShieldQuestion,
-  Key
+  Key,
+  RefreshCw,
+  Link2
 } from 'lucide-react';
 import { INITIAL_HOLDINGS } from './constants';
 import { AssetHolding, MarketType, AssetType, CashBalance } from './types';
@@ -42,7 +44,7 @@ import TrendChart from './components/TrendChart';
 import AddStockModal from './components/AddStockModal';
 import AddBondModal from './components/AddBondModal';
 import AIInsightSection from './components/AIInsightSection';
-import { getPortfolioAdvice } from './services/geminiService';
+import { getPortfolioAdvice, updatePortfolioPrices } from './services/geminiService';
 import { GoogleDriveService } from './services/googleDriveService';
 
 const EXCHANGE_RATE = 1350;
@@ -60,6 +62,8 @@ const App: React.FC = () => {
   const [isStorageReady, setIsStorageReady] = useState(false); 
   const [isPermissionDenied, setIsPermissionDenied] = useState(false); 
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [isPriceSyncing, setIsPriceSyncing] = useState(false);
+  const [searchSources, setSearchSources] = useState<any[]>([]);
   
   const [showCloudSettings, setShowCloudSettings] = useState(false);
   const [driveService, setDriveService] = useState<GoogleDriveService | null>(null);
@@ -118,7 +122,6 @@ const App: React.FC = () => {
     const service = driveService || new GoogleDriveService(googleClientId);
     if (!driveService) setDriveService(service);
 
-    // 만약 강제 리셋이나 권한 거부 상태라면 기존 세션 무효화 후 다시 시작
     if (forceReset || isPermissionDenied) {
       await service.revokeToken();
     }
@@ -148,6 +151,30 @@ const App: React.FC = () => {
       }
     });
     service.requestToken();
+  };
+
+  const handleSyncPrices = async () => {
+    if (holdings.length === 0) return;
+    setIsPriceSyncing(true);
+    try {
+      const { prices, sources } = await updatePortfolioPrices(holdings);
+      setSearchSources(sources);
+      
+      setHoldings(prev => prev.map(h => {
+        const match = prices.find(p => p.symbol === h.symbol || p.symbol.includes(h.symbol));
+        if (match) {
+          return { ...h, currentPrice: match.price, lastUpdated: new Date().toISOString() };
+        }
+        return h;
+      }));
+      
+      // 즉시 클라우드 저장 트리거
+      setTimeout(() => handlePushToCloud(), 500);
+    } catch (e) {
+      alert("시세 동기화 중 오류가 발생했습니다.");
+    } finally {
+      setIsPriceSyncing(false);
+    }
   };
 
   const handlePushToCloud = async (isBackground = false) => {
@@ -344,7 +371,6 @@ const App: React.FC = () => {
     );
   }
 
-  // 1. 로그인 전 화면
   if (!isCloudConnected) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 sm:p-10 bg-slate-50/50">
@@ -377,7 +403,6 @@ const App: React.FC = () => {
     );
   }
 
-  // 2. 권한 부족 안내 화면 (강화됨)
   if (isPermissionDenied || !isStorageReady) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 overflow-y-auto">
@@ -429,7 +454,6 @@ const App: React.FC = () => {
     );
   }
 
-  // 3. 정상 대시보드 화면
   return (
     <div className="min-h-screen pb-24 font-sans tracking-tight">
       <header className="bg-white/70 backdrop-blur-2xl border-b border-white/50 sticky top-0 z-40">
@@ -445,6 +469,14 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button 
+              onClick={handleSyncPrices}
+              disabled={isPriceSyncing || holdings.length === 0}
+              className={`flex items-center gap-2 px-5 py-3 rounded-xl transition-all font-black text-[10px] uppercase tracking-wider border shadow-sm active:scale-95 ${isPriceSyncing ? 'bg-slate-50 text-slate-400' : 'bg-white text-indigo-600 border-indigo-50 hover:bg-indigo-50'}`}
+            >
+              {isPriceSyncing ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              <span>{isPriceSyncing ? '동기화 중...' : '시세 동기화'}</span>
+            </button>
             <button onClick={() => setShowCloudSettings(true)} className="p-3 text-slate-400 hover:text-slate-900 transition-all rounded-xl hover:bg-white hover:shadow-sm"><Settings size={18} /></button>
             <div className="flex items-center gap-2">
               <button onClick={() => setIsStockModalOpen(true)} className={`flex items-center gap-2 px-6 py-3.5 rounded-[1.2rem] transition-all font-black text-[11px] uppercase tracking-wider border active:scale-95 bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100`}><TrendingUp size={16} /><span>주식 추가</span></button>
@@ -474,6 +506,24 @@ const App: React.FC = () => {
           <>
             <div className="glass-panel p-10 rounded-[3rem] mb-12 overflow-hidden relative border border-white/60 shadow-2xl"><TrendChart data={trendData} title={selectedMetric} subtitle="(실시간)" /></div>
             <AIInsightSection advice={advice} isAnalyzing={isAnalyzing} onAnalyze={handleAnalyzePortfolio} />
+            
+            {/* 시세 검색 출처 표시 */}
+            {searchSources.length > 0 && (
+              <div className="mb-6 px-8 py-4 bg-slate-50/50 rounded-2xl border border-slate-100 flex items-center gap-4 animate-in fade-in duration-500">
+                <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  <Link2 size={14} />
+                  <span>Price Sources (Grounding)</span>
+                </div>
+                <div className="flex gap-3 overflow-x-auto scrollbar-hide">
+                  {searchSources.map((source, idx) => (
+                    <a key={idx} href={source.web?.uri} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-indigo-500 hover:underline whitespace-nowrap">
+                      {source.web?.title || 'Source'}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4">{Object.entries(groupedHoldings).map(([account, assets]) => (
                 <StockTable key={account} title={account} holdings={assets} isOpen={openAccount === account} onToggle={() => setOpenAccount(openAccount === account ? null : account)} onDelete={(id) => setHoldings(prev => prev.filter(h => h.id !== id))} cashBalance={cashBalances[account] || { krw: 0, usd: 0 }} onUpdateCash={(amount, currency) => handleUpdateCash(account, amount, currency)} onAdjustHolding={handleAdjustHolding} realizedProfit={realizedProfits[account]} portfolioTotalEval={summary.totalEvaluationAmount} autoIncome={summary.autoCalculatedIncomeByAccount[account]} />
               ))}</div>

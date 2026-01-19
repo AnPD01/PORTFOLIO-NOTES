@@ -2,6 +2,55 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AssetHolding, MarketType } from "../types";
 
+export interface PriceUpdateResult {
+  symbol: string;
+  price: number;
+}
+
+export const updatePortfolioPrices = async (holdings: AssetHolding[]) => {
+  if (holdings.length === 0) return { prices: [], sources: [] };
+  
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const symbols = holdings.map(h => `${h.name}(${h.symbol}, ${h.market})`).join(', ');
+
+  const prompt = `
+    Find the CURRENT real-time market price for the following financial assets: [${symbols}].
+    For KOREA market assets, provide the price in KRW.
+    For USA market assets, provide the price in USD.
+    Return the data as a JSON array of objects with 'symbol' and 'price'.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              symbol: { type: Type.STRING },
+              price: { type: Type.NUMBER }
+            },
+            required: ["symbol", "price"]
+          }
+        }
+      }
+    });
+
+    const prices: PriceUpdateResult[] = JSON.parse(response.text || "[]");
+    const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    
+    return { prices, sources };
+  } catch (error) {
+    console.error("Price Sync Error:", error);
+    throw error;
+  }
+};
+
 export const getPortfolioAdvice = async (holdings: AssetHolding[]) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -77,7 +126,7 @@ export interface StockSearchResult {
   name: string;
   market: MarketType;
   currentPriceEstimate: number;
-  dividendYield: number; // 전년도 배당수익률 추가
+  dividendYield: number; 
 }
 
 export const searchStocks = async (query: string): Promise<StockSearchResult[]> => {
