@@ -27,7 +27,7 @@ export class GoogleDriveService {
   private isGapiInitialized: boolean = false;
 
   constructor(clientId: string) {
-    this.clientId = clientId;
+    this.clientId = clientId.trim();
   }
 
   async initGapi() {
@@ -50,16 +50,24 @@ export class GoogleDriveService {
     });
   }
 
-  /**
-   * 사용자가 필수 권한(drive.file)을 승인했는지 확인합니다.
-   */
   hasRequiredScopes(response: any): boolean {
-    const grantedScopes = response.scope || '';
+    const grantedScopes = response.scope || response.granted_scopes || '';
     if (!grantedScopes) return false;
     
-    // 공백으로 구분된 스코프 리스트를 배열로 변환하여 확인 (대소문자 무시)
-    const scopesArray = grantedScopes.toLowerCase().split(' ');
-    return scopesArray.includes(SCOPES.toLowerCase());
+    const decodedScopes = decodeURIComponent(grantedScopes).toLowerCase();
+    return decodedScopes.includes(SCOPES.toLowerCase());
+  }
+
+  /**
+   * 기존 인증 세션을 완전히 서버에서 무효화합니다. (권한 재요청용)
+   */
+  async revokeToken() {
+    if (this.accessToken) {
+      window.google?.accounts?.oauth2?.revoke(this.accessToken, () => {
+        console.log("Token revoked");
+        this.accessToken = null;
+      });
+    }
   }
 
   initTokenClient(callback: (resp: any) => void) {
@@ -70,6 +78,8 @@ export class GoogleDriveService {
     this.tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: this.clientId,
       scope: SCOPES,
+      // enable_serial_consent: true -> 권한을 개별적으로 선택할 수 있는 창을 강제함
+      enable_serial_consent: true,
       callback: (resp: any) => {
         if (resp.error) {
           console.error("Token client error:", resp.error);
@@ -86,7 +96,7 @@ export class GoogleDriveService {
 
   requestToken() {
     if (!this.tokenClient) throw new Error("Token client not ready");
-    // select_account와 consent를 함께 사용하여 계정 전환 및 권한 재확인을 보장함
+    // select_account와 consent를 조합하여 확실하게 동의 창을 띄움
     this.tokenClient.requestAccessToken({ prompt: 'select_account consent' });
   }
 
@@ -124,7 +134,7 @@ export class GoogleDriveService {
       return this.folderId!;
     } catch (error: any) {
       const status = error?.status || error?.result?.error?.code;
-      if (status === 403 || status === 401 || error?.result?.error?.status === 'PERMISSION_DENIED') {
+      if (status === 403 || status === 401 || status === 404 || error?.result?.error?.status === 'PERMISSION_DENIED') {
         throw new Error("PERMISSION_DENIED");
       }
       throw error;
