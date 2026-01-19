@@ -24,6 +24,7 @@ export class GoogleDriveService {
   private accessToken: string | null = null;
   private clientId: string;
   private folderId: string | null = null;
+  private isGapiInitialized: boolean = false;
 
   constructor(clientId: string) {
     this.clientId = clientId;
@@ -40,6 +41,7 @@ export class GoogleDriveService {
           await window.gapi.client.init({
             discoveryDocs: [DISCOVERY_DOC],
           });
+          this.isGapiInitialized = true;
           resolve();
         } catch (err) {
           reject(err);
@@ -49,11 +51,15 @@ export class GoogleDriveService {
   }
 
   /**
-   * 사용자가 필수 권한을 승인했는지 확인합니다.
+   * 사용자가 필수 권한(drive.file)을 승인했는지 확인합니다.
    */
   hasRequiredScopes(response: any): boolean {
     const grantedScopes = response.scope || '';
-    return grantedScopes.includes(SCOPES);
+    if (!grantedScopes) return false;
+    
+    // 공백으로 구분된 스코프 리스트를 배열로 변환하여 확인 (대소문자 무시)
+    const scopesArray = grantedScopes.toLowerCase().split(' ');
+    return scopesArray.includes(SCOPES.toLowerCase());
   }
 
   initTokenClient(callback: (resp: any) => void) {
@@ -65,9 +71,14 @@ export class GoogleDriveService {
       client_id: this.clientId,
       scope: SCOPES,
       callback: (resp: any) => {
-        if (resp.error) return;
+        if (resp.error) {
+          console.error("Token client error:", resp.error);
+          return;
+        }
         this.accessToken = resp.access_token;
-        window.gapi.client.setToken({ access_token: resp.access_token });
+        if (window.gapi?.client) {
+          window.gapi.client.setToken({ access_token: resp.access_token });
+        }
         callback(resp);
       },
     });
@@ -75,12 +86,13 @@ export class GoogleDriveService {
 
   requestToken() {
     if (!this.tokenClient) throw new Error("Token client not ready");
-    // prompt: 'consent'를 통해 항상 권한 체크박스 화면이 나오도록 강제합니다.
-    this.tokenClient.requestAccessToken({ prompt: 'consent' });
+    // select_account와 consent를 함께 사용하여 계정 전환 및 권한 재확인을 보장함
+    this.tokenClient.requestAccessToken({ prompt: 'select_account consent' });
   }
 
   async getOrCreateFolder(): Promise<string> {
     if (this.folderId) return this.folderId;
+    if (!this.isGapiInitialized) await this.initGapi();
 
     try {
       const response = await window.gapi.client.drive.files.list({
@@ -106,13 +118,13 @@ export class GoogleDriveService {
         fields: 'id',
       });
 
-      if (!createResponse.result.id) throw new Error("Insufficient Permissions");
+      if (!createResponse.result.id) throw new Error("PERMISSION_DENIED");
       
       this.folderId = createResponse.result.id;
       return this.folderId!;
     } catch (error: any) {
-      // 403 에러나 권한 관련 에러 시 상위로 던짐
-      if (error?.status === 403 || error?.result?.error?.status === 'PERMISSION_DENIED') {
+      const status = error?.status || error?.result?.error?.code;
+      if (status === 403 || status === 401 || error?.result?.error?.status === 'PERMISSION_DENIED') {
         throw new Error("PERMISSION_DENIED");
       }
       throw error;
@@ -120,18 +132,14 @@ export class GoogleDriveService {
   }
 
   async findDataFile(): Promise<string | null> {
-    try {
-      const folderId = await this.getOrCreateFolder();
-      const response = await window.gapi.client.drive.files.list({
-        q: `name = '${FILE_NAME}' and '${folderId}' in parents and trashed = false`,
-        fields: 'files(id)',
-        spaces: 'drive'
-      });
-      const files = response.result.files;
-      return files && files.length > 0 ? files[0].id : null;
-    } catch (error) {
-      throw error;
-    }
+    const folderId = await this.getOrCreateFolder();
+    const response = await window.gapi.client.drive.files.list({
+      q: `name = '${FILE_NAME}' and '${folderId}' in parents and trashed = false`,
+      fields: 'files(id)',
+      spaces: 'drive'
+    });
+    const files = response.result.files;
+    return files && files.length > 0 ? files[0].id : null;
   }
 
   async downloadData(fileId: string): Promise<CloudData | null> {

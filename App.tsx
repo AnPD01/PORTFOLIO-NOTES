@@ -26,7 +26,8 @@ import {
   ExternalLink,
   AlertCircle,
   SquareCheck,
-  ChevronRight
+  ChevronRight,
+  ShieldAlert
 } from 'lucide-react';
 import { INITIAL_HOLDINGS } from './constants';
 import { AssetHolding, MarketType, AssetType, CashBalance } from './types';
@@ -49,13 +50,15 @@ const App: React.FC = () => {
   const [cashBalances, setCashBalances] = useState<Record<string, CashBalance>>({});
 
   const [googleClientId, setGoogleClientId] = useState(() => (VITE_GOOGLE_CLIENT_ID || localStorage.getItem('google_client_id') || '').trim());
+  
+  // 클라우드 상태 관리
   const [isCloudConnected, setIsCloudConnected] = useState(false);
-  const [isStorageReady, setIsStorageReady] = useState(false); // 저장소 준비 완료 여부
-  const [isPermissionDenied, setIsPermissionDenied] = useState(false); // 권한 거부 여부
+  const [isStorageReady, setIsStorageReady] = useState(false); 
+  const [isPermissionDenied, setIsPermissionDenied] = useState(false); 
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  
   const [showCloudSettings, setShowCloudSettings] = useState(false);
   const [driveService, setDriveService] = useState<GoogleDriveService | null>(null);
-  const [isOriginCopied, setIsOriginCopied] = useState(false);
   
   const skipNextSync = useRef(false);
   const [scriptStatus, setScriptStatus] = useState({ gapi: false, gsi: false });
@@ -95,37 +98,49 @@ const App: React.FC = () => {
   }, [holdings, realizedProfits, cashBalances, isCloudConnected, isStorageReady]);
 
   const handleCloudConnect = () => {
+    // 진행 전 상태 초기화
+    setIsPermissionDenied(false);
+    setIsStorageReady(false);
+
     if (!googleClientId) {
       setShowCloudSettings(true);
       return;
     }
-    if (!scriptStatus.gsi || !scriptStatus.gapi) return;
+    if (!scriptStatus.gsi || !scriptStatus.gapi) {
+      alert("구글 서비스 로딩 중입니다. 잠시 후 다시 시도하세요.");
+      return;
+    }
 
     const service = driveService || new GoogleDriveService(googleClientId);
     if (!driveService) setDriveService(service);
 
     service.initTokenClient(async (resp) => {
-      // 1. 필수 권한(Scope) 체크 확인
+      // 1. 필수 권한(Scope) 승인 여부 확인
       if (!service.hasRequiredScopes(resp)) {
         setIsPermissionDenied(true);
-        setIsCloudConnected(true); // 로그인은 됨
+        setIsCloudConnected(true);
         setIsStorageReady(false);
         return;
       }
 
       setIsCloudConnected(true);
       setIsPermissionDenied(false);
+      
       try {
         setIsCloudSyncing(true);
+        // 2. 드라이브 폴더 접근 가능 여부 최종 확인
         await service.getOrCreateFolder(); 
         setIsStorageReady(true);
-        handlePullFromCloud(); 
+        await handlePullFromCloud(); 
       } catch (e: any) {
+        console.error("Cloud Access Error:", e);
         if (e.message === 'PERMISSION_DENIED') {
           setIsPermissionDenied(true);
           setIsStorageReady(false);
         } else {
-          alert("저장소 준비 중 오류가 발생했습니다.");
+          alert("데이터 저장소에 접근할 수 없습니다. 다시 시도해 주세요.");
+          setIsPermissionDenied(true);
+          setIsStorageReady(false);
         }
       } finally {
         setIsCloudSyncing(false);
@@ -175,12 +190,6 @@ const App: React.FC = () => {
     } finally {
       setIsCloudSyncing(false);
     }
-  };
-
-  const copyOriginToClipboard = () => {
-    navigator.clipboard.writeText(window.location.origin);
-    setIsOriginCopied(true);
-    setTimeout(() => setIsOriginCopied(false), 2000);
   };
 
   const [advice, setAdvice] = useState<string>('');
@@ -286,6 +295,7 @@ const App: React.FC = () => {
       setDriveService(null);
       setIsCloudConnected(false);
       setIsStorageReady(false);
+      setIsPermissionDenied(false);
     }
   };
 
@@ -338,7 +348,7 @@ const App: React.FC = () => {
             </div>
             <div className="space-y-6">
               <h2 className="text-5xl font-black text-slate-900 leading-[1.1] tracking-tighter">당신의 모든 자산,<br/><span className="text-indigo-600 underline decoration-indigo-200 underline-offset-8">안전하게</span> 클라우드로.</h2>
-              <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-md">개인의 소중한 자산 정보를 구글 드라이브(PORTFOLIO NOTES 폴더)에만 안전하게 저장합니다. 시작하려면 구글 로그인이 필요합니다.</p>
+              <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-md">주식 및 채권 자산 정보를 구글 드라이브에 안전하게 보관합니다. 시작하려면 구글 클라우드 클라이언트 ID를 등록해 주세요.</p>
             </div>
           </div>
           <div className="bg-white rounded-[3.5rem] shadow-[0_50px_100px_-20px_rgba(79,70,229,0.15)] p-10 border border-slate-100 flex flex-col gap-10">
@@ -346,11 +356,12 @@ const App: React.FC = () => {
             <div className="space-y-6">
               <div className="space-y-3">
                 <div className="flex items-center justify-between px-1"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Google Cloud Client ID</label><a href="https://console.cloud.google.com/apis/credentials" target="_blank" className="text-[10px] font-bold text-indigo-500 flex items-center gap-1">발급 가이드 <ExternalLink size={10} /></a></div>
-                <input type="text" placeholder="클라이언트 ID를 입력하세요" disabled={!!VITE_GOOGLE_CLIENT_ID} className="w-full px-7 py-5 border border-slate-200 bg-slate-50 text-slate-900 rounded-[2rem] text-sm font-bold outline-none" value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value.trim())} />
+                <input type="text" placeholder="클라이언트 ID를 입력하세요" disabled={!!VITE_GOOGLE_CLIENT_ID} className="w-full px-7 py-5 border border-slate-200 bg-slate-50 text-slate-900 rounded-[2rem] text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-50" value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value.trim())} />
               </div>
             </div>
             <div className="space-y-4">
-              <button onClick={handleCloudConnect} disabled={!googleClientId || !scriptStatus.gsi} className={`w-full py-7 flex items-center justify-center gap-3 rounded-[2.2rem] font-black text-base transition-all shadow-2xl active:scale-95 ${!googleClientId || !scriptStatus.gsi ? 'bg-slate-100 text-slate-300' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}><LogIn size={24} />구글 계정으로 연결하기</button>
+              <button onClick={handleCloudConnect} disabled={!googleClientId || !scriptStatus.gsi} className={`w-full py-7 flex items-center justify-center gap-3 rounded-[2.2rem] font-black text-base transition-all shadow-2xl active:scale-95 ${!googleClientId || !scriptStatus.gsi ? 'bg-slate-100 text-slate-300' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200'}`}><LogIn size={24} />구글 계정으로 연결하기</button>
+              <p className="text-[10px] text-center text-slate-400 font-bold">연결 후 권한 승인 창에서 체크박스를 모두 선택해 주세요.</p>
             </div>
           </div>
         </div>
@@ -358,42 +369,46 @@ const App: React.FC = () => {
     );
   }
 
-  // 2. 권한 부족 안내 화면 (중요!)
+  // 2. 권한 부족 안내 화면
   if (isPermissionDenied || !isStorageReady) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
-        <div className="max-w-xl w-full bg-white rounded-[3.5rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col">
-          <div className="p-10 pb-0">
-            <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-3xl flex items-center justify-center mb-8"><AlertCircle size={32} /></div>
-            <h2 className="text-3xl font-black text-slate-900 leading-tight tracking-tight">드라이브 권한이<br/>승인되지 않았습니다.</h2>
-            <p className="text-slate-500 mt-4 font-medium leading-relaxed">
-              앱이 자산 데이터를 저장하려면 <span className="text-slate-900 font-bold">구글 드라이브 접근 권한</span>이 반드시 필요합니다. 아래 가이드를 따라 권한을 승인해 주세요.
+        <div className="max-w-xl w-full bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col animate-in zoom-in-95 duration-500">
+          <div className="p-12 text-center flex flex-col items-center">
+            <div className="w-24 h-24 bg-rose-50 text-rose-500 rounded-[2.5rem] flex items-center justify-center mb-10 shadow-xl shadow-rose-100/50">
+              <ShieldAlert size={48} />
+            </div>
+            <h2 className="text-3xl font-black text-slate-900 leading-tight tracking-tight mb-4">드라이브 접근 권한이<br/>승인되지 않았습니다</h2>
+            <p className="text-slate-500 font-medium leading-relaxed px-6">
+              자산 데이터를 구글 드라이브에 안전하게 저장하려면 <span className="text-slate-900 font-bold">드라이브 파일 관리 권한</span>이 반드시 필요합니다.
             </p>
           </div>
 
-          <div className="p-10 space-y-6">
-            <div className="p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100 space-y-5">
-              <div className="flex items-start gap-4">
-                <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-1">1</div>
-                <p className="text-sm font-black text-slate-700">로그인 화면에서 아래 항목을 찾으세요.</p>
+          <div className="px-10 pb-12 space-y-6">
+            <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 space-y-6">
+              <div className="flex items-start gap-5">
+                <div className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[11px] font-black flex-shrink-0 mt-0.5 shadow-lg shadow-indigo-100">1</div>
+                <p className="text-[13px] font-black text-slate-700 leading-snug">로그인 화면에서 계정을 선택한 후 나타나는 '권한 요청' 창을 확인하세요.</p>
               </div>
-              <div className="ml-10 p-5 bg-white rounded-2xl border-2 border-indigo-200 shadow-sm flex items-center gap-4">
-                <div className="p-1 bg-indigo-600 text-white rounded"><SquareCheck size={18} /></div>
-                <div className="text-[11px] font-black text-slate-800 leading-snug">
-                  "See, edit, create, and delete all your Google Drive files" <br/>
-                  <span className="text-indigo-600 text-[9px]">(또는 이 앱이 생성한 드라이브 파일 보기 및 관리)</span>
+              <div className="ml-12 p-6 bg-white rounded-3xl border-2 border-indigo-200 shadow-sm flex items-center gap-5 ring-4 ring-indigo-50/50">
+                <div className="p-2 bg-indigo-600 text-white rounded-lg"><SquareCheck size={20} /></div>
+                <div className="text-[11px] font-black text-slate-800 leading-relaxed">
+                   "See, edit, create, and delete only the specific Google Drive files you use with this app" <br/>
+                  <span className="text-indigo-600 text-[10px] underline decoration-2 font-black">항목을 반드시 체크해 주세요.</span>
                 </div>
               </div>
-              <div className="flex items-start gap-4">
-                <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-1">2</div>
-                <p className="text-sm font-black text-slate-700">체크박스를 선택한 후 [Continue]를 누르세요.</p>
+              <div className="flex items-start gap-5">
+                <div className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[11px] font-black flex-shrink-0 mt-0.5 shadow-lg shadow-indigo-100">2</div>
+                <p className="text-[13px] font-black text-slate-700 leading-snug">체크 후 하단의 [Continue] 또는 [계속] 버튼을 누르세요.</p>
               </div>
             </div>
 
-            <button onClick={handleCloudConnect} className="w-full py-6 bg-indigo-600 text-white rounded-[2rem] font-black text-base hover:bg-indigo-700 shadow-xl shadow-indigo-100 transition-all flex items-center justify-center gap-3 active:scale-95">
-              <RotateCcw size={20} /> 권한 다시 설정하기
-            </button>
-            <button onClick={() => { setIsCloudConnected(false); setDriveService(null); }} className="w-full py-4 text-slate-400 font-black text-[11px] uppercase tracking-widest hover:text-slate-600 transition-all">처음으로 돌아가기</button>
+            <div className="space-y-4 pt-2">
+              <button onClick={handleCloudConnect} className="w-full py-6 bg-indigo-600 text-white rounded-[2.2rem] font-black text-base hover:bg-indigo-700 shadow-2xl shadow-indigo-200 transition-all flex items-center justify-center gap-3 active:scale-95 group">
+                <RotateCcw size={22} className="group-hover:rotate-180 transition-transform duration-700" /> 권한 다시 설정하기
+              </button>
+              <button onClick={() => { setIsCloudConnected(false); setDriveService(null); setIsPermissionDenied(false); }} className="w-full py-4 text-slate-400 font-black text-[11px] uppercase tracking-[0.3em] hover:text-slate-600 transition-all">처음 화면으로 돌아가기</button>
+            </div>
           </div>
         </div>
       </div>
@@ -467,7 +482,7 @@ const App: React.FC = () => {
                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">동기화 상태</h4>
                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center"><CheckCircle2 size={20} /></div><div><p className="text-sm font-black text-slate-800">구글 드라이브 연결됨</p><p className="text-[10px] text-slate-400 font-bold tracking-tight">자동 저장 기능이 활성화되었습니다.</p></div></div>
-                    <button onClick={() => { setIsCloudConnected(false); setIsStorageReady(false); setShowCloudSettings(false); }} className="px-4 py-2 bg-rose-50 text-rose-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all">로그아웃</button>
+                    <button onClick={() => { setIsCloudConnected(false); setIsStorageReady(false); setIsPermissionDenied(false); setShowCloudSettings(false); }} className="px-4 py-2 bg-rose-50 text-rose-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all">로그아웃</button>
                  </div>
               </div>
               <div className="space-y-4"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Google Cloud Client ID</label><div className="flex gap-2"><input type="text" readOnly className="flex-1 px-6 py-4 border border-slate-200 bg-slate-100 text-slate-500 rounded-2xl text-xs font-bold outline-none" value={googleClientId} /><button onClick={handleResetClientId} className="px-5 py-4 bg-slate-200 text-slate-600 rounded-2xl text-[10px] font-black hover:bg-rose-100 transition-all"><RotateCcw size={16} /></button></div></div>
