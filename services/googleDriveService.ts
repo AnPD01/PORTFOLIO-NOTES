@@ -9,6 +9,7 @@ declare global {
 
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const FOLDER_NAME = 'PORTFOLIO NOTES';
 const FILE_NAME = 'portfolio_notes_data.json';
 
 export interface CloudData {
@@ -22,6 +23,7 @@ export class GoogleDriveService {
   private tokenClient: any = null;
   private accessToken: string | null = null;
   private clientId: string;
+  private folderId: string | null = null;
 
   constructor(clientId: string) {
     this.clientId = clientId;
@@ -74,10 +76,49 @@ export class GoogleDriveService {
     this.tokenClient.requestAccessToken({ prompt: 'consent' });
   }
 
+  /**
+   * 전용 폴더를 찾거나 없으면 생성하여 ID를 반환합니다.
+   */
+  private async getOrCreateFolder(): Promise<string> {
+    if (this.folderId) return this.folderId;
+
+    try {
+      // 1. 폴더 존재 여부 확인
+      const response = await window.gapi.client.drive.files.list({
+        q: `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id)',
+      });
+
+      const folders = response.result.files;
+      if (folders && folders.length > 0) {
+        this.folderId = folders[0].id;
+        return this.folderId!;
+      }
+
+      // 2. 폴더가 없으면 생성
+      const folderMetadata = {
+        name: FOLDER_NAME,
+        mimeType: 'application/vnd.google-apps.folder',
+      };
+
+      const createResponse = await window.gapi.client.drive.files.create({
+        resource: folderMetadata,
+        fields: 'id',
+      });
+
+      this.folderId = createResponse.result.id;
+      return this.folderId!;
+    } catch (error) {
+      console.error("Error getting/creating folder:", error);
+      throw error;
+    }
+  }
+
   async findDataFile(): Promise<string | null> {
     try {
+      const folderId = await this.getOrCreateFolder();
       const response = await window.gapi.client.drive.files.list({
-        q: `name = '${FILE_NAME}' and trashed = false`,
+        q: `name = '${FILE_NAME}' and '${folderId}' in parents and trashed = false`,
         fields: 'files(id, name)',
       });
       const files = response.result.files;
@@ -106,16 +147,14 @@ export class GoogleDriveService {
       throw new Error("No access token available. Please login again.");
     }
 
+    const folderId = await this.getOrCreateFolder();
     const fileId = await this.findDataFile();
-    const metadata = {
-      name: FILE_NAME,
-      mimeType: 'application/json',
-    };
+    
     const body = JSON.stringify({ ...data, lastSynced: new Date().toISOString() });
 
     try {
       if (fileId) {
-        // Update existing file
+        // 기존 파일 업데이트
         await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
           method: 'PATCH',
           headers: {
@@ -125,7 +164,13 @@ export class GoogleDriveService {
           body: body,
         });
       } else {
-        // Create new file
+        // 새 파일 생성 (전용 폴더를 부모로 지정)
+        const metadata = {
+          name: FILE_NAME,
+          mimeType: 'application/json',
+          parents: [folderId]
+        };
+
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', new Blob([body], { type: 'application/json' }));

@@ -111,7 +111,7 @@ const App: React.FC = () => {
       service.requestToken();
     } catch (error) {
       console.error(error);
-      alert("로그인 창을 여는 중 오류가 발생했습니다. (400 오류 시 설정창의 가이드 혹은 현재 도메인 등록 여부를 확인하세요)");
+      alert("로그인 창을 여는 중 오류가 발생했습니다. 구글 클라우드 콘솔 설정을 확인하세요.");
     }
   };
 
@@ -383,22 +383,6 @@ const App: React.FC = () => {
                   onChange={(e) => setGoogleClientId(e.target.value.trim())}
                 />
               </div>
-
-              <div className="p-7 bg-slate-50 rounded-[2.5rem] border border-slate-100 space-y-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">현재 접속 주소 (Origin)</span>
-                  <button onClick={copyOriginToClipboard} className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-black text-indigo-600 shadow-sm active:scale-95 transition-all">
-                    {isOriginCopied ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
-                    {isOriginCopied ? '복사됨' : '복사'}
-                  </button>
-                </div>
-                <div className="p-4 bg-white rounded-2xl border border-slate-100 text-[11px] font-bold text-slate-600 break-all select-all shadow-inner">
-                  {window.location.origin}
-                </div>
-                <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
-                  <span className="text-amber-600 font-black">400 오류 해결:</span> 구글 클라우드 콘솔의 '승인된 자바스크립트 원본'에 위 주소를 정확히 등록했는지 확인하세요.
-                </p>
-              </div>
             </div>
 
             <div className="space-y-4">
@@ -554,6 +538,9 @@ const App: React.FC = () => {
                 <div className="p-4 bg-white/70 rounded-2xl border border-white text-[11px] font-bold text-slate-600 break-all select-all">
                   {window.location.origin}
                 </div>
+                <p className="text-[10px] text-slate-400 leading-relaxed font-medium mt-2">
+                  <span className="text-amber-600 font-black">400 오류 시:</span> 위 주소를 구글 콘솔의 '승인된 자바스크립트 원본'에 등록하세요.
+                </p>
               </div>
               
               <button onClick={() => setShowCloudSettings(false)} className="w-full py-5 bg-indigo-600 text-white rounded-[1.8rem] font-black text-sm hover:bg-indigo-700 shadow-xl shadow-indigo-100 transition-all flex items-center justify-center gap-2">확인 완료</button>
