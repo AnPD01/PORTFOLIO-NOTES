@@ -49,6 +49,7 @@ import { GoogleDriveService } from './services/googleDriveService';
 
 const EXCHANGE_RATE = 1350;
 const VITE_GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
+const AUTO_SYNC_INTERVAL = 300000; // 5분 (ms)
 
 const App: React.FC = () => {
   const [isAppLoading, setIsAppLoading] = useState(true);
@@ -106,6 +107,25 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [holdings, realizedProfits, cashBalances, isCloudConnected, isStorageReady]);
 
+  // 초기 로딩 후 자동 시세 동기화 및 5분 주기 타이머 설정
+  useEffect(() => {
+    if (isStorageReady) {
+      // 1. 초기 로딩 시 즉시 동기화
+      if (holdings.length > 0) {
+        handleSyncPrices();
+      }
+
+      // 2. 5분 주기 자동 갱신
+      const interval = setInterval(() => {
+        if (holdings.length > 0) {
+          handleSyncPrices();
+        }
+      }, AUTO_SYNC_INTERVAL);
+
+      return () => clearInterval(interval);
+    }
+  }, [isStorageReady, holdings.length > 0]);
+
   const handleCloudConnect = async (forceReset = false) => {
     setIsPermissionDenied(false);
     setIsStorageReady(false);
@@ -141,8 +161,6 @@ const App: React.FC = () => {
         setIsCloudSyncing(true);
         await service.getOrCreateFolder(); 
         setIsStorageReady(true);
-        
-        // 연결 성공 직후 클라우드 데이터 로드
         await handlePullFromCloud(true); 
       } catch (e: any) {
         console.error("Cloud Access Error:", e);
@@ -172,7 +190,7 @@ const App: React.FC = () => {
       
       setTimeout(() => handlePushToCloud(), 500);
     } catch (e) {
-      alert("시세 동기화 중 오류가 발생했습니다.");
+      console.warn("Price sync failed, will retry later.");
     } finally {
       setIsPriceSyncing(false);
     }
@@ -202,7 +220,6 @@ const App: React.FC = () => {
     if (!driveService || !isCloudConnected || !isStorageReady) return;
     setIsCloudSyncing(true);
     try {
-      // 보강된 loadPortfolioData 호출
       const data = await driveService.loadPortfolioData();
       if (data) {
         if (isAutoLoad || window.confirm("클라우드에 저장된 데이터가 있습니다. 불러오시겠습니까?")) {
@@ -327,8 +344,6 @@ const App: React.FC = () => {
     finally { setIsAnalyzing(false); }
   };
 
-  const formatKRW = (num: number) => new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW' }).format(num);
-
   const groupedHoldings = useMemo(() => {
     const groups: Record<string, AssetHolding[]> = {};
     holdings.forEach(h => {
@@ -388,7 +403,6 @@ const App: React.FC = () => {
             </div>
             <div className="space-y-4">
               <button onClick={() => handleCloudConnect()} disabled={!googleClientId || !scriptStatus.gsi} className={`w-full py-7 flex items-center justify-center gap-3 rounded-[2.2rem] font-black text-base transition-all shadow-2xl active:scale-95 ${!googleClientId || !scriptStatus.gsi ? 'bg-slate-100 text-slate-300' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200'}`}><LogIn size={24} />구글 계정으로 연결하기</button>
-              <p className="text-[10px] text-center text-slate-400 font-bold">연결 후 권한 승인 창에서 체크박스를 모두 선택해 주세요.</p>
             </div>
           </div>
         </div>
@@ -399,48 +413,25 @@ const App: React.FC = () => {
   if (isPermissionDenied || !isStorageReady) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 overflow-y-auto">
-        <div className="max-w-xl w-full bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-10 animate-in zoom-in-95 duration-500">
+        <div className="max-w-xl w-full bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden flex flex-col my-10">
           <div className="p-12 text-center flex flex-col items-center">
             <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-[2rem] flex items-center justify-center mb-8 shadow-xl shadow-indigo-100/50">
               <ShieldQuestion size={40} />
             </div>
-            <h2 className="text-3xl font-black text-slate-900 leading-tight tracking-tight mb-4">드라이브 권한 승인</h2>
-            <p className="text-slate-500 font-medium leading-relaxed px-6 text-base">
+            <h2 className="text-3xl font-black text-slate-900 mb-4">드라이브 권한 승인</h2>
+            <p className="text-slate-500 font-medium leading-relaxed px-6">
               구글 드라이브에 데이터를 저장하려면<br/>
               <span className="text-indigo-600 font-extrabold underline decoration-indigo-200 underline-offset-4">권한 요청 창의 모든 체크박스</span>를 선택해야 합니다.
             </p>
           </div>
 
           <div className="px-12 pb-14 space-y-6">
-            <div className="p-8 bg-indigo-50/50 rounded-[2.5rem] border-2 border-dashed border-indigo-200 flex flex-col items-center gap-4 text-center">
-                <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-indigo-600 shadow-sm">
-                  <SquareCheck size={20} />
-                </div>
-                <p className="text-[11px] font-black text-slate-600 leading-normal uppercase tracking-tight">
-                  "See, edit, create, and delete only the specific Google Drive files you use with this app"
-                </p>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              <button 
-                onClick={() => handleCloudConnect(true)} 
-                className="w-full py-7 bg-indigo-600 text-white rounded-[2.2rem] font-black text-lg hover:bg-indigo-700 shadow-2xl shadow-indigo-200 transition-all flex items-center justify-center gap-4 active:scale-95 group"
-              >
+            <button onClick={() => handleCloudConnect(true)} className="w-full py-7 bg-indigo-600 text-white rounded-[2.2rem] font-black text-lg hover:bg-indigo-700 shadow-2xl transition-all flex items-center justify-center gap-4">
                 <Key size={24} /> 드라이브 권한 승인하기
-              </button>
-              
-              <button 
-                onClick={handleFullReset} 
-                className="w-full py-5 bg-slate-50 text-slate-400 rounded-[1.8rem] font-black text-xs hover:bg-slate-100 transition-all flex items-center justify-center gap-3 active:scale-95"
-              >
+            </button>
+            <button onClick={handleFullReset} className="w-full py-5 bg-slate-50 text-slate-400 rounded-[1.8rem] font-black text-xs hover:bg-slate-100 transition-all flex items-center justify-center gap-3">
                 <Settings size={16} /> 설정 초기화 (처음부터 다시)
-              </button>
-            </div>
-
-            <p className="text-[10px] text-center text-slate-400 font-bold leading-relaxed">
-              * 버튼을 누르면 계정 선택 후 체크박스가 포함된 동의 화면이 나타납니다.<br/>
-              반드시 항목을 체크하고 [계속]을 눌러주세요.
-            </p>
+            </button>
           </div>
         </div>
       </div>
@@ -457,7 +448,7 @@ const App: React.FC = () => {
               <h1 className="text-2xl font-black text-slate-900 tracking-tighter leading-none">PORTFOLIO NOTES</h1>
               <div className="flex items-center gap-2 mt-1.5">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Asset Management</p>
-                {isCloudSyncing ? <div className="flex items-center gap-1.5 text-[9px] font-bold text-indigo-500"><CloudSync size={12} className="animate-spin" /> 동기화 중...</div> : <div className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-500"><CheckCircle2 size={12} /> 클라우드 연결됨</div>}
+                {isPriceSyncing ? <div className="flex items-center gap-1.5 text-[9px] font-bold text-indigo-500"><RefreshCw size={12} className="animate-spin" /> 동기화 중...</div> : <div className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-500"><CheckCircle2 size={12} /> 클라우드 연결됨</div>}
               </div>
             </div>
           </div>
@@ -498,22 +489,6 @@ const App: React.FC = () => {
             <div className="glass-panel p-10 rounded-[3rem] mb-12 overflow-hidden relative border border-white/60 shadow-2xl"><TrendChart data={trendData} title={selectedMetric} subtitle="(실시간)" /></div>
             <AIInsightSection advice={advice} isAnalyzing={isAnalyzing} onAnalyze={handleAnalyzePortfolio} />
             
-            {searchSources.length > 0 && (
-              <div className="mb-6 px-8 py-4 bg-slate-50/50 rounded-2xl border border-slate-100 flex items-center gap-4 animate-in fade-in duration-500">
-                <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  <Link2 size={14} />
-                  <span>Price Sources</span>
-                </div>
-                <div className="flex gap-3 overflow-x-auto scrollbar-hide">
-                  {searchSources.map((source, idx) => (
-                    <a key={idx} href={source.web?.uri} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-indigo-500 hover:underline whitespace-nowrap">
-                      {source.web?.title || 'Source'}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="space-y-4">{Object.entries(groupedHoldings).map(([account, assets]) => (
                 <StockTable key={account} title={account} holdings={assets} isOpen={openAccount === account} onToggle={() => setOpenAccount(openAccount === account ? null : account)} onDelete={(id) => setHoldings(prev => prev.filter(h => h.id !== id))} cashBalance={cashBalances[account] || { krw: 0, usd: 0 }} onUpdateCash={(amount, currency) => handleUpdateCash(account, amount, currency)} onAdjustHolding={handleAdjustHolding} realizedProfit={realizedProfits[account]} portfolioTotalEval={summary.totalEvaluationAmount} autoIncome={summary.autoCalculatedIncomeByAccount[account]} />
               ))}</div>
@@ -522,7 +497,6 @@ const App: React.FC = () => {
           <div className="py-24 flex flex-col items-center justify-center bg-white/40 backdrop-blur-md rounded-[3rem] border border-white/60 shadow-2xl border-dashed text-center">
              <div className="w-20 h-20 bg-slate-100 rounded-[2rem] flex items-center justify-center text-slate-300 mb-8 border border-slate-200/50"><Inbox size={32} /></div>
              <h3 className="text-xl font-black text-slate-800 tracking-tight">자산 데이터가 없습니다</h3>
-             <p className="text-slate-400 mt-3 max-w-sm font-medium leading-relaxed text-sm">상단의 버튼을 눌러 당신의 포트폴리오를 구성해보세요. 변경사항은 클라우드에 즉시 자동 저장됩니다.</p>
           </div>
         )}
       </main>
@@ -530,16 +504,15 @@ const App: React.FC = () => {
       {showCloudSettings && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xl z-[200] flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-xl overflow-hidden border border-white flex flex-col max-h-[90vh]">
-            <div className="px-8 py-7 border-b border-slate-100 flex items-center justify-between"><div className="flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><Settings size={20} /></div><div><h3 className="text-xl font-black text-slate-800 tracking-tight">설정 및 진단</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Diagnostics & Preferences</p></div></div><button onClick={() => setShowCloudSettings(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all"><X size={20} className="text-slate-400" /></button></div>
+            <div className="px-8 py-7 border-b border-slate-100 flex items-center justify-between"><div className="flex items-center gap-3"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><Settings size={20} /></div><div><h3 className="text-xl font-black text-slate-800 tracking-tight">설정 및 진단</h3></div></div><button onClick={() => setShowCloudSettings(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all"><X size={20} className="text-slate-400" /></button></div>
             <div className="p-8 space-y-6 overflow-y-auto scrollbar-hide">
               <div className="p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100 space-y-4">
                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">동기화 상태</h4>
                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center"><CheckCircle2 size={20} /></div><div><p className="text-sm font-black text-slate-800">구글 드라이브 연결됨</p><p className="text-[10px] text-slate-400 font-bold tracking-tight">자동 저장 기능이 활성화되었습니다.</p></div></div>
+                    <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center"><CheckCircle2 size={20} /></div><div><p className="text-sm font-black text-slate-800">구글 드라이브 연결됨</p></div></div>
                     <button onClick={handleFullReset} className="px-4 py-2 bg-rose-50 text-rose-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all">로그아웃</button>
                  </div>
               </div>
-              <div className="space-y-4"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Google Cloud Client ID</label><div className="flex gap-2"><input type="text" readOnly className="flex-1 px-6 py-4 border border-slate-200 bg-slate-100 text-slate-500 rounded-2xl text-xs font-bold outline-none" value={googleClientId} /></div></div>
               <button onClick={() => setShowCloudSettings(false)} className="w-full py-5 bg-indigo-600 text-white rounded-[1.8rem] font-black text-sm hover:bg-indigo-700 transition-all">확인 완료</button>
             </div>
           </div>

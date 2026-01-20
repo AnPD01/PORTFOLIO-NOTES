@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Loader2, Info, Keyboard, TrendingUp, Calendar, Percent, Coins } from 'lucide-react';
+import { X, Search, Loader2, Info, Keyboard, TrendingUp, Calendar, Percent, Coins, Edit3 } from 'lucide-react';
 import { AccountType, MarketType, StockHolding, AssetType } from '../types';
 import { searchStocks, StockSearchResult } from '../services/geminiService';
 
@@ -17,18 +17,18 @@ const AddStockModal: React.FC<AddStockModalProps> = ({ onClose, onAdd, existingA
   const [showManualEntry, setShowManualEntry] = useState(false);
   
   const [formData, setFormData] = useState({
-    account: existingAccounts[0] || '',
+    account: existingAccounts[0] || '기본 계좌',
     newAccountName: '',
     isNewAccount: false,
     accountCategory: AccountType.OTHER,
     market: MarketType.KOREA,
     symbol: '',
     name: '',
-    quantity: 0,
-    avgPrice: 0, // UI상 '구입 단가'로 표시됨
+    quantity: 1,
+    avgPrice: 0, 
     currentPrice: 0,
     dividends: 0,
-    dividendYield: 0, // AI 검색을 통해 자동 입력되는 전년도 배당률
+    dividendYield: 0,
     purchaseDate: new Date().toISOString().split('T')[0]
   });
 
@@ -59,9 +59,10 @@ const AddStockModal: React.FC<AddStockModalProps> = ({ onClose, onAdd, existingA
       ...prev,
       market: stock.market,
       symbol: stock.symbol,
-      name: stock.name,
+      name: stock.name, // 기본값으로 검색된 이름(영문 등) 세팅
       currentPrice: stock.currentPriceEstimate,
-      dividendYield: stock.dividendYield // 전년도 배당률 자동 세팅
+      avgPrice: stock.currentPriceEstimate,
+      dividendYield: stock.dividendYield 
     }));
     setShowManualEntry(true);
     setSearchResults([]);
@@ -77,7 +78,7 @@ const AddStockModal: React.FC<AddStockModalProps> = ({ onClose, onAdd, existingA
       accountCategory: formData.accountCategory,
       market: formData.market,
       symbol: formData.symbol,
-      name: formData.name || formData.symbol,
+      name: formData.name || formData.symbol, // 사용자가 수정한 한글 이름 등이 저장됨
       quantity: Number(formData.quantity),
       avgPurchasePrice: Number(formData.avgPrice),
       currentPrice: Number(formData.currentPrice),
@@ -145,7 +146,7 @@ const AddStockModal: React.FC<AddStockModalProps> = ({ onClose, onAdd, existingA
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-black text-slate-700">{new Intl.NumberFormat('ko-KR').format(stock.currentPriceEstimate)}원</div>
+                        <div className="text-sm font-black text-slate-700">{stock.market === MarketType.USA ? '$' : '₩'}{new Intl.NumberFormat('ko-KR').format(stock.currentPriceEstimate)}</div>
                         <div className="text-[9px] font-black text-emerald-500 mt-1 uppercase">배당 {stock.dividendYield}%</div>
                       </div>
                     </button>
@@ -169,18 +170,32 @@ const AddStockModal: React.FC<AddStockModalProps> = ({ onClose, onAdd, existingA
                 <button type="button" onClick={() => setShowManualEntry(false)} className="text-[10px] font-black text-indigo-500 uppercase tracking-widest hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition-all">← 다시 검색하기</button>
               </div>
 
-              {/* 종목 요약 정보 (전년도 배당률 표시) */}
-              <div className="bg-indigo-50/50 p-6 rounded-[1.5rem] border border-indigo-100 flex items-center justify-between">
+              {/* 종목명 수정 영역 추가 */}
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
+                  <Edit3 size={12} className="text-indigo-500" /> 종목명 수정 (한글 이름 권장)
+                </label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="예: 삼성전자"
+                  className="w-full px-5 py-4 border border-indigo-200 bg-indigo-50/20 text-slate-900 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 font-bold"
+                  value={formData.name}
+                  onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-[1.5rem] border border-slate-100 flex items-center justify-between">
                 <div>
-                  <h4 className="text-sm font-black text-slate-800">{formData.name || '직접 입력'}</h4>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{formData.symbol || 'SYMBOL'}</p>
+                  <h4 className="text-sm font-black text-slate-800">{formData.symbol || 'SYMBOL'}</h4>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{formData.market} Market</p>
                 </div>
                 <div className="text-right">
-                  <div className="flex items-center gap-1.5 text-emerald-600 mb-1 justify-end">
+                  <div className="flex items-center gap-1.5 text-indigo-600 mb-1 justify-end">
                     <Coins size={12} />
-                    <span className="text-[10px] font-black uppercase tracking-widest">전년도 공시 배당률</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">실시간 현재가</span>
                   </div>
-                  <div className="text-lg font-black text-slate-900 tabular-nums">{formData.dividendYield.toFixed(2)}%</div>
+                  <div className="text-lg font-black text-slate-900 tabular-nums">{currencySymbol}{new Intl.NumberFormat('ko-KR').format(formData.currentPrice)}</div>
                 </div>
               </div>
 
@@ -194,7 +209,7 @@ const AddStockModal: React.FC<AddStockModalProps> = ({ onClose, onAdd, existingA
                   <input type="text" placeholder="계좌명" required className="w-full px-5 py-4 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-50 text-sm font-bold bg-white" value={formData.newAccountName} onChange={e => setFormData(prev => ({ ...prev, newAccountName: e.target.value }))} />
                 ) : (
                   <select className="w-full px-5 py-4 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-50 text-sm font-bold bg-white" value={formData.account} onChange={e => setFormData(prev => ({ ...prev, account: e.target.value }))}>
-                    {existingAccounts.map(acc => <option key={acc} value={acc}>{acc}</option>)}
+                    {existingAccounts.length > 0 ? existingAccounts.map(acc => <option key={acc} value={acc}>{acc}</option>) : <option value="기본 계좌">기본 계좌</option>}
                   </select>
                 )}
               </div>
@@ -212,19 +227,6 @@ const AddStockModal: React.FC<AddStockModalProps> = ({ onClose, onAdd, existingA
                   </div>
                 </div>
               </div>
-
-              {!formData.name && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">종목명 (직접입력)</label>
-                    <input type="text" className="w-full px-5 py-4 border border-slate-200 rounded-2xl text-sm font-bold" value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">티커/코드</label>
-                    <input type="text" className="w-full px-5 py-4 border border-slate-200 rounded-2xl text-sm font-bold" value={formData.symbol} onChange={e => setFormData(prev => ({ ...prev, symbol: e.target.value.toUpperCase() }))} />
-                  </div>
-                </div>
-              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
