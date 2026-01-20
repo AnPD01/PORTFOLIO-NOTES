@@ -18,6 +18,19 @@ export enum AccountType {
   OTHER = '기타'
 }
 
+export enum TransactionType {
+  BUY = 'BUY',
+  SELL = 'SELL'
+}
+
+export interface Transaction {
+  id: string;
+  date: string; // YYYY-MM-DD
+  type: TransactionType;
+  quantity: number;
+  price: number;
+}
+
 export interface AssetHolding {
   id: string;
   type: AssetType;
@@ -26,21 +39,26 @@ export interface AssetHolding {
   market: MarketType;
   symbol: string;
   name: string;
-  quantity: number;
+  
+  // 데이터 원천: 모든 수량과 평단가는 이 배열에서 계산됩니다.
+  transactions: Transaction[];
+
+  // 하단 필드들은 하위 호환성 및 계산 편의를 위해 유지하되, UI 렌더링 시에는 계산된 값을 우선합니다.
+  quantity: number; 
   avgPurchasePrice: number;
   currentPrice: number;
-  dividendsReceived: number; // 수동 입력/기수령 배당금
-  dividendYield?: number;    // 자동 계산용 연 배당수익률 (%)
-  purchaseDate: string;      // 수익 계산 기준일 (YYYY-MM-DD)
+  
+  dividendsReceived: number; 
+  dividendYield?: number;    
+  purchaseDate: string;      
   lastUpdated: string;
   
-  // 채권 전용 설정
   bondConfig?: {
     purchaseDate: string;
     maturityDate: string;
-    couponRate: number; // 표면 금리 (%)
-    faceValue: number;  // 액면가
-    interestCycle: number; // 이자 지급 주기 (개월)
+    couponRate: number; 
+    faceValue: number;  
+    interestCycle: number; 
   };
 }
 

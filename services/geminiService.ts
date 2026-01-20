@@ -81,7 +81,7 @@ export const updatePortfolioPrices = async (holdings: AssetHolding[]) => {
 };
 
 /**
- * 종목 검색 및 실시간 가격 추출
+ * 하이브리드 종목 검색 (Gemini 한국어 이름 + Yahoo 실시간 가격)
  */
 export interface StockSearchResult {
   symbol: string;
@@ -92,15 +92,16 @@ export interface StockSearchResult {
 }
 
 export const searchStocks = async (query: string): Promise<StockSearchResult[]> => {
-  if (!query || query.length < 2) return [];
+  if (!query || query.length < 1) return [];
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
+    // 1단계: Gemini에게 한국어 종목명과 티커를 찾아달라고 요청 (검색 엔진)
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Find official stock symbols/names for: "${query}".`,
+      contents: `Find official stock symbols and Korean names for the query: "${query}".`,
       config: {
-        systemInstruction: "Return a JSON array of up to 5 objects. Fields: 'symbol' (6 digits for KR), 'name', 'market' ('KOREA' or 'USA'), 'dividendYield' (number). No prices.",
+        systemInstruction: "You are a professional stock market data provider. Return a JSON array of up to 5 results. Each object MUST contain: 'symbol' (ticker, use 6 digits for Korea), 'name' (MUST BE OFFICIAL KOREAN NAME, e.g. '삼성전자' or '애플'), 'market' ('KOREA' or 'USA'), and 'dividendYield' (number, use 0 if unknown).",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -121,6 +122,7 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
     const initialResults = JSON.parse(response.text || "[]");
     const finalResults: StockSearchResult[] = [];
     
+    // 2단계: 각 티커에 대해 야후 파이낸스에서 실시간 가격을 가져옴 (병렬 실행)
     const pricePromises = initialResults.map(async (stock: any) => {
       const market = stock.market === 'USA' ? MarketType.USA : MarketType.KOREA;
       const realData = await fetchYahooPrice(stock.symbol, market);
@@ -128,9 +130,18 @@ export const searchStocks = async (query: string): Promise<StockSearchResult[]> 
       if (realData) {
         finalResults.push({
           symbol: realData.symbol,
-          name: stock.name,
+          name: stock.name, // Gemini가 찾아준 한국어 이름 사용
           market: market,
           currentPriceEstimate: realData.regularMarketPrice,
+          dividendYield: stock.dividendYield || 0
+        });
+      } else {
+        // 야후에서 가격을 못 가져와도 결과는 추가 (단가 0으로라도)
+        finalResults.push({
+          symbol: stock.symbol,
+          name: stock.name,
+          market: market,
+          currentPriceEstimate: 0,
           dividendYield: stock.dividendYield || 0
         });
       }
@@ -153,9 +164,9 @@ export const getPortfolioAdvice = async (holdings: AssetHolding[]) => {
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `다음 포트폴리오를 분석하고 조언을 한글로 작성해줘:\n${portfolioText}`,
+      contents: `다음 포트폴리오를 분석하고 조언을 한국어로 작성해줘:\n${portfolioText}`,
       config: {
-        systemInstruction: "금융 전문가로서 마크다운 형식으로 답변하십시오.",
+        systemInstruction: "당신은 한국 시장과 미국 시장을 잘 아는 금융 전문가입니다. 마크다운 형식으로 답변하십시오.",
       }
     });
     return response.text;
@@ -172,7 +183,7 @@ export const lookupBondInfo = async (symbol: string) => {
       model: 'gemini-3-flash-preview',
       contents: `Bond ISIN/Code: "${symbol}"`,
       config: {
-        systemInstruction: "Extract bond info as JSON: name, couponRate, maturityDate, faceValue.",
+        systemInstruction: "Extract bond info as JSON: name (Korean), couponRate, maturityDate, faceValue.",
         responseMimeType: "application/json",
       }
     });

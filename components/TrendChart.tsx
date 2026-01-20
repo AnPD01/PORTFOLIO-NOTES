@@ -47,14 +47,16 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, title, subtitle, color = 
             dataKey="date" 
             axisLine={false} 
             tickLine={false} 
-            tick={{ fontSize: 10, fontBold: 700, fill: '#94a3b8' }} 
+            // Fix: Changed fontBold to fontWeight to match SVGProps
+            tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }} 
             dy={10}
             minTickGap={20}
           />
           <YAxis 
             axisLine={false} 
             tickLine={false} 
-            tick={{ fontSize: 10, fontBold: 700, fill: '#94a3b8' }}
+            // Fix: Changed fontBold to fontWeight to match SVGProps
+            tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
             tickFormatter={formatCurrency}
           />
           <Tooltip 

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { X, Search, Loader2, ScrollText, Calendar, Percent, Sparkles, Globe } from 'lucide-react';
-import { AssetHolding, AccountType, MarketType, AssetType } from '../types';
+import { AssetHolding, AccountType, MarketType, AssetType, TransactionType } from '../types';
 import { lookupBondInfo } from '../services/geminiService';
 
 interface AddBondModalProps {
@@ -60,7 +60,8 @@ const AddBondModal: React.FC<AddBondModalProps> = ({ onClose, onAdd, existingAcc
       return;
     }
     
-    // FIX: Included missing root-level purchaseDate property required by AssetHolding type
+    // Fix: transactions property is required by AssetHolding. 
+    // Initializing with the starting purchase transaction.
     const newBond: AssetHolding = {
       id: Math.random().toString(36).substr(2, 9),
       type: AssetType.BOND,
@@ -69,6 +70,16 @@ const AddBondModal: React.FC<AddBondModalProps> = ({ onClose, onAdd, existingAcc
       market: formData.market,
       symbol: symbol.toUpperCase(),
       name: formData.name,
+      
+      // Initialize transaction history with the current purchase
+      transactions: [{
+        id: Math.random().toString(36).substr(2, 9),
+        date: formData.purchaseDate,
+        type: TransactionType.BUY,
+        quantity: Number(formData.quantity),
+        price: Number(formData.purchasePrice)
+      }],
+
       quantity: Number(formData.quantity),
       avgPurchasePrice: Number(formData.purchasePrice),
       currentPrice: Number(formData.purchasePrice), 
